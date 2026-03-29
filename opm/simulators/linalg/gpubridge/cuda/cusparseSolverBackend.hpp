@@ -28,23 +28,24 @@
 #include <opm/simulators/linalg/gpubridge/GpuSolver.hpp>
 #include <opm/simulators/linalg/gpubridge/WellContributions.hpp>
 
-namespace Opm::Accelerator {
+namespace Opm::Accelerator
+{
 
 /// This class implements a cusparse-based ilu0-bicgstab solver on GPU
-template<class Scalar, unsigned int block_size>
-class cusparseSolverBackend : public GpuSolver<Scalar,block_size>
+template <class Scalar, unsigned int block_size>
+class cusparseSolverBackend : public GpuSolver<Scalar, block_size>
 {
-    using Base = GpuSolver<Scalar,block_size>;
+    using Base = GpuSolver<Scalar, block_size>;
 
+    using Base::deviceID;
+    using Base::initialized;
+    using Base::maxit;
     using Base::N;
     using Base::Nb;
     using Base::nnz;
     using Base::nnzb;
-    using Base::verbosity;
-    using Base::deviceID;
-    using Base::maxit;
     using Base::tolerance;
-    using Base::initialized;
+    using Base::verbosity;
 
 private:
     cublasHandle_t cublasHandle;
@@ -57,29 +58,29 @@ private:
     Scalar *d_bVals, *d_mVals;
     int *d_bCols, *d_mCols;
     int *d_bRows, *d_mRows;
-    Scalar *d_x, *d_b, *d_r, *d_rw, *d_p;     // vectors, used during linear solve
+    Scalar *d_x, *d_b, *d_r, *d_rw, *d_p; // vectors, used during linear solve
     Scalar *d_pw, *d_s, *d_t, *d_v;
-    void *d_buffer;
-    Scalar *vals_contiguous;                  // only used if COPY_ROW_BY_ROW is true in cusparseSolverBackend.cpp
+    void* d_buffer;
+    Scalar* vals_contiguous; // only used if COPY_ROW_BY_ROW is true in cusparseSolverBackend.cpp
 
     bool analysis_done = false;
 
     bool useJacMatrix = false;
-    int nnzbs_prec;             // number of nonzero blocks in the matrix for preconditioner
-                                // could be jacMatrix or matrix
+    int nnzbs_prec; // number of nonzero blocks in the matrix for preconditioner
+                    // could be jacMatrix or matrix
 
     double c_copy = 0.0; // cummulative timer measuring the total time it takes to transfer the data to the GPU
 
     /// Solve linear system using ilu0-bicgstab
-    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to matrix A
+    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
+    /// matrix A
     /// \param[inout] res         summary of solver result
     void gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res);
 
     /// Initialize GPU and allocate memory
     /// \param[in] matrix         matrix for spmv
     /// \param[in] jacMatrix      matrix for preconditioner
-    void initialize(std::shared_ptr<BlockedMatrix<Scalar>> matrix,
-                    std::shared_ptr<BlockedMatrix<Scalar>> jacMatrix);
+    void initialize(std::shared_ptr<BlockedMatrix<Scalar>> matrix, std::shared_ptr<BlockedMatrix<Scalar>> jacMatrix);
 
     /// Clean memory
     void finalize();
@@ -111,9 +112,10 @@ private:
     bool create_preconditioner();
 
     /// Solve linear system
-    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to matrix A
+    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
+    /// matrix A
     /// \param[inout] res         summary of solver result
-    void solve_system(WellContributions<Scalar>& wellContribs, GpuResult &res);
+    void solve_system(WellContributions<Scalar>& wellContribs, GpuResult& res);
 
 public:
     /// Construct a cusparseSolver
@@ -121,8 +123,7 @@ public:
     /// \param[in] maxit                      maximum number of iterations for cusparseSolver
     /// \param[in] tolerance                  required relative tolerance for cusparseSolver
     /// \param[in] deviceID                   the device to be used
-    cusparseSolverBackend(int linear_solver_verbosity, int maxit,
-                          Scalar tolerance, unsigned int deviceID);
+    cusparseSolverBackend(int linear_solver_verbosity, int maxit, Scalar tolerance, unsigned int deviceID);
 
     /// Destroy a cusparseSolver, and free memory
     ~cusparseSolverBackend();
@@ -131,7 +132,8 @@ public:
     /// \param[in] matrix         matrix A
     /// \param[in] b              input vector, contains N values
     /// \param[in] jacMatrix      matrix for preconditioner
-    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to matrix A
+    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
+    /// matrix A
     /// \param[inout] res         summary of solver result
     /// \return                   status code
     SolverStatus solve_system(std::shared_ptr<BlockedMatrix<Scalar>> matrix,

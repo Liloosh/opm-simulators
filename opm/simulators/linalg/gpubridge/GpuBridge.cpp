@@ -17,18 +17,18 @@
   along with OPM.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "dune/istl/bcrsmatrix.hh"
 #include <config.h>
 #include <opm/common/TimingMacros.hpp>
-#include "dune/istl/bcrsmatrix.hh"
 #include <opm/simulators/linalg/matrixblock.hh>
 
-#include <opm/common/OpmLog/OpmLog.hpp>
 #include <opm/common/ErrorMacros.hpp>
+#include <opm/common/OpmLog/OpmLog.hpp>
 
 #include <opm/simulators/linalg/gpubridge/GpuBridge.hpp>
 #include <opm/simulators/linalg/gpubridge/GpuResult.hpp>
-#include <opm/simulators/linalg/gpubridge/WellContributions.hpp>
 #include <opm/simulators/linalg/gpubridge/Misc.hpp>
+#include <opm/simulators/linalg/gpubridge/WellContributions.hpp>
 
 #if HAVE_CUDA
 #include <opm/simulators/linalg/gpubridge/cuda/cusparseSolverBackend.hpp>
@@ -55,29 +55,29 @@
 
 using InverseOperatorResult = Dune::InverseOperatorResult;
 
-namespace Opm {
+namespace Opm
+{
 
 using Accelerator::GpuResult;
 using Accelerator::GpuSolver;
 using Accelerator::SolverStatus;
 
-template<class BridgeMatrix, class BridgeVector, int block_size>
-GpuBridge<BridgeMatrix, BridgeVector, block_size>::
-GpuBridge(std::string accelerator_mode_,
-          int linear_solver_verbosity,
-          [[maybe_unused]] int maxit,
-          [[maybe_unused]] Scalar tolerance,
-          [[maybe_unused]] unsigned int platformID,
-          [[maybe_unused]] unsigned int deviceID,
-          [[maybe_unused]] bool opencl_ilu_parallel,
-          [[maybe_unused]] std::string linsolver)
+template <class BridgeMatrix, class BridgeVector, int block_size>
+GpuBridge<BridgeMatrix, BridgeVector, block_size>::GpuBridge(std::string accelerator_mode_,
+                                                             int linear_solver_verbosity,
+                                                             [[maybe_unused]] int maxit,
+                                                             [[maybe_unused]] Scalar tolerance,
+                                                             [[maybe_unused]] unsigned int platformID,
+                                                             [[maybe_unused]] unsigned int deviceID,
+                                                             [[maybe_unused]] bool opencl_ilu_parallel,
+                                                             [[maybe_unused]] std::string linsolver)
     : verbosity(linear_solver_verbosity)
     , accelerator_mode(accelerator_mode_)
 {
     if (accelerator_mode.compare("cusparse") == 0) {
 #if HAVE_CUDA
         use_gpu = true;
-        using CU = Accelerator::cusparseSolverBackend<Scalar,block_size>;
+        using CU = Accelerator::cusparseSolverBackend<Scalar, block_size>;
         backend = std::make_unique<CU>(linear_solver_verbosity, maxit, tolerance, deviceID);
 #else
         OPM_THROW(std::logic_error, "Error cusparseSolver was chosen, but CUDA was not found by CMake");
@@ -85,26 +85,20 @@ GpuBridge(std::string accelerator_mode_,
     } else if (accelerator_mode.compare("opencl") == 0) {
 #if HAVE_OPENCL
         use_gpu = true;
-        using OCL = Accelerator::openclSolverBackend<Scalar,block_size>;
-        backend = std::make_unique<OCL>(linear_solver_verbosity,
-                                        maxit,
-                                        tolerance,
-                                        platformID,
-                                        deviceID,
-                                        opencl_ilu_parallel,
-                                        linsolver);
+        using OCL = Accelerator::openclSolverBackend<Scalar, block_size>;
+        backend = std::make_unique<OCL>(
+            linear_solver_verbosity, maxit, tolerance, platformID, deviceID, opencl_ilu_parallel, linsolver);
 #else
         OPM_THROW(std::logic_error, "Error openclSolver was chosen, but OpenCL was not found by CMake");
 #endif
     } else if (accelerator_mode.compare("amgcl") == 0) {
 #if HAVE_AMGCL
-        if constexpr (std::is_same_v<Scalar,float>) {
+        if constexpr (std::is_same_v<Scalar, float>) {
             OPM_THROW(std::logic_error, "Error amgclSolver disabled with float Scalar");
         } else {
             use_gpu = true; // should be replaced by a 'use_bridge' boolean
-            using AMGCL = Accelerator::amgclSolverBackend<Scalar,block_size>;
-            backend = std::make_unique<AMGCL>(linear_solver_verbosity, maxit,
-                                              tolerance, platformID, deviceID);
+            using AMGCL = Accelerator::amgclSolverBackend<Scalar, block_size>;
+            backend = std::make_unique<AMGCL>(linear_solver_verbosity, maxit, tolerance, platformID, deviceID);
         }
 #else
         OPM_THROW(std::logic_error, "Error amgclSolver was chosen, but amgcl was not found by CMake");
@@ -112,7 +106,7 @@ GpuBridge(std::string accelerator_mode_,
     } else if (accelerator_mode.compare("rocalution") == 0) {
 #if HAVE_ROCALUTION
         use_gpu = true; // should be replaced by a 'use_bridge' boolean
-        using ROCA = Accelerator::rocalutionSolverBackend<Scalar,block_size>;
+        using ROCA = Accelerator::rocalutionSolverBackend<Scalar, block_size>;
         backend = std::make_unique<ROCA>(linear_solver_verbosity, maxit, tolerance);
 #else
         OPM_THROW(std::logic_error, "Error rocalutionSolver was chosen, but rocalution was not found by CMake");
@@ -120,37 +114,38 @@ GpuBridge(std::string accelerator_mode_,
     } else if (accelerator_mode.compare("rocsparse") == 0) {
 #if HAVE_ROCSPARSE
         use_gpu = true; // should be replaced by a 'use_bridge' boolean
-        using ROCS = Accelerator::rocsparseSolverBackend<Scalar,block_size>;
-        backend = std::make_unique<ROCS>(linear_solver_verbosity, maxit,
-                                         tolerance, platformID, deviceID, linsolver);
+        using ROCS = Accelerator::rocsparseSolverBackend<Scalar, block_size>;
+        backend = std::make_unique<ROCS>(linear_solver_verbosity, maxit, tolerance, platformID, deviceID, linsolver);
 #else
         OPM_THROW(std::logic_error, "Error rocsparseSolver was chosen, but rocsparse/rocblas was not found by CMake");
 #endif
     } else if (accelerator_mode.compare("none") == 0) {
         use_gpu = false;
     } else {
-        OPM_THROW(std::logic_error, "Error unknown value for parameter 'AcceleratorMode', should be passed like '--accelerator-mode=[none|cusparse|opencl|amgcl|rocalution|rocsparse]");
+        OPM_THROW(std::logic_error,
+                  "Error unknown value for parameter 'AcceleratorMode', should be passed like "
+                  "'--accelerator-mode=[none|cusparse|opencl|amgcl|rocalution|rocsparse]");
     }
 }
 
-//TODO: should move this function to misc.cpp!!!
+// TODO: should move this function to misc.cpp!!!
 template <class BridgeMatrix>
-int replaceZeroDiagonal(BridgeMatrix& mat,
-                    std::vector<typename BridgeMatrix::size_type>& diag_indices)
+int
+replaceZeroDiagonal(BridgeMatrix& mat, std::vector<typename BridgeMatrix::size_type>& diag_indices)
 {
     using Scalar = typename BridgeMatrix::field_type;
     int numZeros = 0;
-    const int dim = mat[0][0].N();                    // might be replaced with BridgeMatrix::block_type::size()
+    const int dim = mat[0][0].N(); // might be replaced with BridgeMatrix::block_type::size()
     const Scalar zero_replace = 1e-15;
     if (diag_indices.empty()) {
         int Nb = mat.N();
         diag_indices.reserve(Nb);
         for (typename BridgeMatrix::iterator r = mat.begin(); r != mat.end(); ++r) {
-            auto diag = r->find(r.index());  // diag is an iterator
+            auto diag = r->find(r.index()); // diag is an iterator
             assert(diag.index() == r.index()); // every row must have a diagonal block
             for (int rr = 0; rr < dim; ++rr) {
                 auto& val = (*diag)[rr][rr]; // reference to easily change the value
-                if (val == 0.0) {             // could be replaced by '< 1e-30' or similar
+                if (val == 0.0) { // could be replaced by '< 1e-30' or similar
                     val = zero_replace;
                     ++numZeros;
                 }
@@ -160,10 +155,11 @@ int replaceZeroDiagonal(BridgeMatrix& mat,
     } else {
         for (typename BridgeMatrix::iterator r = mat.begin(); r != mat.end(); ++r) {
             typename BridgeMatrix::size_type offset = diag_indices[r.index()];
-            auto& diag_block = r->getptr()[offset]; // diag_block is a reference to MatrixBlock, located on column r of row r
+            auto& diag_block
+                = r->getptr()[offset]; // diag_block is a reference to MatrixBlock, located on column r of row r
             for (int rr = 0; rr < dim; ++rr) {
                 auto& val = diag_block[rr][rr];
-                if (val == 0.0) {                     // could be replaced by '< 1e-30' or similar
+                if (val == 0.0) { // could be replaced by '< 1e-30' or similar
                     val = zero_replace;
                     ++numZeros;
                 }
@@ -178,10 +174,10 @@ int replaceZeroDiagonal(BridgeMatrix& mat,
 // sparsity pattern should stay the same
 // this could be removed if Dune::BCRSMatrix features an API call that returns colIndices and rowPointers
 template <class BridgeMatrix, class BridgeVector, int block_size>
-void GpuBridge<BridgeMatrix, BridgeVector, block_size>::
-copySparsityPatternFromISTL(const BridgeMatrix& mat,
-                            std::vector<int>& h_rows,
-                            std::vector<int>& h_cols)
+void
+GpuBridge<BridgeMatrix, BridgeVector, block_size>::copySparsityPatternFromISTL(const BridgeMatrix& mat,
+                                                                               std::vector<int>& h_rows,
+                                                                               std::vector<int>& h_cols)
 {
     h_rows.clear();
     h_cols.clear();
@@ -208,18 +204,20 @@ copySparsityPatternFromISTL(const BridgeMatrix& mat,
 // the first value of the first row of row 1 is equal to 1
 // if the matrix only has 1 row, it is always contiguous
 template <class BridgeMatrix>
-void checkMemoryContiguous(const BridgeMatrix& mat)
+void
+checkMemoryContiguous(const BridgeMatrix& mat)
 {
     auto block_size = mat[0][0].N();
     auto row = mat.begin();
     auto last_of_row0 = row->begin();
 
     // last_of_row0 points to last block, not to row->end()
-    for(auto tmp = row->begin(); tmp != row->end(); ++tmp) {
+    for (auto tmp = row->begin(); tmp != row->end(); ++tmp) {
         last_of_row0 = tmp;
     }
 
-    bool isContiguous = mat.N() < 2 || std::distance(&((*last_of_row0)[block_size-1][block_size-1]), &(*mat[1].begin())[0][0]) == 1;
+    bool isContiguous = mat.N() < 2
+        || std::distance(&((*last_of_row0)[block_size - 1][block_size - 1]), &(*mat[1].begin())[0][0]) == 1;
 
     if (!isContiguous) {
         OPM_THROW(std::logic_error, "Error memory of Matrix looks not contiguous");
@@ -227,13 +225,13 @@ void checkMemoryContiguous(const BridgeMatrix& mat)
 }
 
 template <class BridgeMatrix, class BridgeVector, int block_size>
-void GpuBridge<BridgeMatrix, BridgeVector, block_size>::
-solve_system(BridgeMatrix* bridgeMat,
-             BridgeMatrix* jacMat,
-             int numJacobiBlocks,
-             BridgeVector& b,
-             WellContributions<Scalar>& wellContribs,
-             InverseOperatorResult& res)
+void
+GpuBridge<BridgeMatrix, BridgeVector, block_size>::solve_system(BridgeMatrix* bridgeMat,
+                                                                BridgeMatrix* jacMat,
+                                                                int numJacobiBlocks,
+                                                                BridgeVector& b,
+                                                                WellContributions<Scalar>& wellContribs,
+                                                                InverseOperatorResult& res)
 {
     if (use_gpu) {
         GpuResult result;
@@ -243,42 +241,46 @@ solve_system(BridgeMatrix* bridgeMat,
         const int nnzb = bridgeMat->nonzeroes();
 
         if (dim != 3) {
-            OpmLog::warning("GpuSolver only accepts blocksize = 3 at this time, will use Dune for the remainder of the program");
+            OpmLog::warning(
+                "GpuSolver only accepts blocksize = 3 at this time, will use Dune for the remainder of the program");
             use_gpu = false;
             return;
         }
 
         using Mat = Accelerator::BlockedMatrix<Scalar>;
         if (!matrix) {
-            h_rows.reserve(Nb+1);
+            h_rows.reserve(Nb + 1);
             h_cols.reserve(nnzb);
             copySparsityPatternFromISTL(*bridgeMat, h_rows, h_cols);
             checkMemoryContiguous(*bridgeMat);
-            matrix = std::make_unique<Mat>(Nb, nnzb, block_size,
+            matrix = std::make_unique<Mat>(Nb,
+                                           nnzb,
+                                           block_size,
                                            static_cast<Scalar*>(&(((*bridgeMat)[0][0][0][0]))),
                                            h_cols.data(),
                                            h_rows.data());
         }
 
         Dune::Timer t_zeros;
-        int numZeros = replaceZeroDiagonal(*bridgeMat, diagIndices); //NOTE-RN: this also initializes the diagindeces!!!
+        int numZeros = replaceZeroDiagonal(*bridgeMat, diagIndices); // NOTE-RN: this also initializes the
+                                                                     // diagindeces!!!
         if (verbosity >= 2) {
             std::ostringstream out;
-            out << "Checking zeros took: " << t_zeros.stop() << " s, found "
-                << numZeros << " zeros";
+            out << "Checking zeros took: " << t_zeros.stop() << " s, found " << numZeros << " zeros";
             OpmLog::info(out.str());
         }
 
         if (numJacobiBlocks >= 2) {
-            const int jacNnzb = (h_jacRows.empty()) ? jacMat->nonzeroes()
-                                                    : h_jacRows.back();
+            const int jacNnzb = (h_jacRows.empty()) ? jacMat->nonzeroes() : h_jacRows.back();
 
             if (!jacMatrix) {
-                h_jacRows.reserve(Nb+1);
+                h_jacRows.reserve(Nb + 1);
                 h_jacCols.reserve(jacNnzb);
                 copySparsityPatternFromISTL(*jacMat, h_jacRows, h_jacCols);
                 checkMemoryContiguous(*jacMat);
-                jacMatrix = std::make_unique<Mat>(Nb, jacNnzb, block_size,
+                jacMatrix = std::make_unique<Mat>(Nb,
+                                                  jacNnzb,
+                                                  block_size,
                                                   static_cast<Scalar*>(&(((*jacMat)[0][0][0][0]))),
                                                   h_jacCols.data(),
                                                   h_jacRows.data());
@@ -288,22 +290,21 @@ solve_system(BridgeMatrix* bridgeMat,
             int jacNumZeros = replaceZeroDiagonal(*jacMat, jacDiagIndices);
             if (verbosity >= 2) {
                 std::ostringstream out;
-                out << "Checking zeros for jacMat took: " << t_zeros2.stop()
-                    << " s, found " << jacNumZeros << " zeros";
+                out << "Checking zeros for jacMat took: " << t_zeros2.stop() << " s, found " << jacNumZeros << " zeros";
                 OpmLog::info(out.str());
             }
         }
 
         /////////////////////////
         // actually solve
-        // assume that underlying data (nonzeroes) from b (Dune::BlockVector) are contiguous, if this is not the case, the chosen GpuSolver is expected to perform undefined behaviour
-        SolverStatus status = backend->solve_system(matrix,
-                                                    static_cast<Scalar*>(&(b[0][0])),
-                                                    jacMatrix, wellContribs, result);
+        // assume that underlying data (nonzeroes) from b (Dune::BlockVector) are contiguous, if this is not the case,
+        // the chosen GpuSolver is expected to perform undefined behaviour
+        SolverStatus status
+            = backend->solve_system(matrix, static_cast<Scalar*>(&(b[0][0])), jacMatrix, wellContribs, result);
 
         switch (status) {
         case SolverStatus::GPU_SOLVER_SUCCESS:
-            //OpmLog::info("GpuSolver converged");
+            // OpmLog::info("GpuSolver converged");
             break;
         case SolverStatus::GPU_SOLVER_ANALYSIS_FAILED:
             OpmLog::warning("GpuSolver could not analyse level information of matrix, "
@@ -330,8 +331,8 @@ solve_system(BridgeMatrix* bridgeMat,
 }
 
 template <class BridgeMatrix, class BridgeVector, int block_size>
-void GpuBridge<BridgeMatrix, BridgeVector, block_size>::
-get_result([[maybe_unused]] BridgeVector& x)
+void
+GpuBridge<BridgeMatrix, BridgeVector, block_size>::get_result([[maybe_unused]] BridgeVector& x)
 {
     if (use_gpu) {
         backend->get_result(static_cast<Scalar*>(&(x[0][0])));
@@ -339,17 +340,16 @@ get_result([[maybe_unused]] BridgeVector& x)
 }
 
 template <class BridgeMatrix, class BridgeVector, int block_size>
-void GpuBridge<BridgeMatrix, BridgeVector, block_size>::
-initWellContributions([[maybe_unused]] WellContributions<Scalar>& wellContribs,
-                      [[maybe_unused]] unsigned N)
+void
+GpuBridge<BridgeMatrix, BridgeVector, block_size>::initWellContributions(
+    [[maybe_unused]] WellContributions<Scalar>& wellContribs, [[maybe_unused]] unsigned N)
 {
     if (accelerator_mode.compare("opencl") == 0) {
 #if HAVE_OPENCL
-        using OCL = Accelerator::openclSolverBackend<Scalar,block_size>;
+        using OCL = Accelerator::openclSolverBackend<Scalar, block_size>;
         const auto openclBackend = static_cast<const OCL*>(backend.get());
         using WCOCL = WellContributionsOCL<Scalar>;
-        static_cast<WCOCL&>(wellContribs).setOpenCLEnv(openclBackend->context.get(),
-                                                       openclBackend->queue.get());
+        static_cast<WCOCL&>(wellContribs).setOpenCLEnv(openclBackend->context.get(), openclBackend->queue.get());
 #else
         OPM_THROW(std::logic_error, "Error openclSolver was chosen, but OpenCL was not found by CMake");
 #endif
@@ -358,19 +358,19 @@ initWellContributions([[maybe_unused]] WellContributions<Scalar>& wellContribs,
 }
 
 // the tests use Dune::FieldMatrix, Flow uses Opm::MatrixBlock
-#define INSTANTIATE_GPU_FUNCTIONS(T,n)                                     \
-    template class GpuBridge<Dune::BCRSMatrix<MatrixBlock<T,n,n>>,         \
-                   Dune::BlockVector<Dune::FieldVector<T,n>>,n>;           \
-    template class GpuBridge<Dune::BCRSMatrix<Dune::FieldMatrix<T,n,n>>,   \
-                             Dune::BlockVector<Dune::FieldVector<T,n>>,n>;
+#define INSTANTIATE_GPU_FUNCTIONS(T, n)                                                                                \
+    template class GpuBridge<Dune::BCRSMatrix<MatrixBlock<T, n, n>>, Dune::BlockVector<Dune::FieldVector<T, n>>, n>;   \
+    template class GpuBridge<Dune::BCRSMatrix<Dune::FieldMatrix<T, n, n>>,                                             \
+                             Dune::BlockVector<Dune::FieldVector<T, n>>,                                               \
+                             n>;
 
-#define INSTANTIATE_TYPE(T)        \
-    INSTANTIATE_GPU_FUNCTIONS(T,1) \
-    INSTANTIATE_GPU_FUNCTIONS(T,2) \
-    INSTANTIATE_GPU_FUNCTIONS(T,3) \
-    INSTANTIATE_GPU_FUNCTIONS(T,4) \
-    INSTANTIATE_GPU_FUNCTIONS(T,5) \
-    INSTANTIATE_GPU_FUNCTIONS(T,6)
+#define INSTANTIATE_TYPE(T)                                                                                            \
+    INSTANTIATE_GPU_FUNCTIONS(T, 1)                                                                                    \
+    INSTANTIATE_GPU_FUNCTIONS(T, 2)                                                                                    \
+    INSTANTIATE_GPU_FUNCTIONS(T, 3)                                                                                    \
+    INSTANTIATE_GPU_FUNCTIONS(T, 4)                                                                                    \
+    INSTANTIATE_GPU_FUNCTIONS(T, 5)                                                                                    \
+    INSTANTIATE_GPU_FUNCTIONS(T, 6)
 
 INSTANTIATE_TYPE(double)
 
