@@ -63,6 +63,12 @@ private:
     void* d_buffer;
     Scalar* vals_contiguous; // only used if COPY_ROW_BY_ROW is true in cusparseSolverBackend.cpp
 
+    const bool graph_enabled;
+
+    // variables needed for graph
+    Scalar *norm_0_d, *m_one_graph_const_d, *one_graph_const_d;
+    Scalar *beta_d, *rho_d, *rhop_d, *alpha_d, *omega_d, *nomega_d;
+
     bool analysis_done = false;
 
     bool useJacMatrix = false;
@@ -75,6 +81,7 @@ private:
     /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
     /// matrix A
     /// \param[inout] res         summary of solver result
+    template <bool enabled>
     void gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res);
 
     /// Initialize GPU and allocate memory
@@ -123,7 +130,9 @@ public:
     /// \param[in] maxit                      maximum number of iterations for cusparseSolver
     /// \param[in] tolerance                  required relative tolerance for cusparseSolver
     /// \param[in] deviceID                   the device to be used
-    cusparseSolverBackend(int linear_solver_verbosity, int maxit, Scalar tolerance, unsigned int deviceID);
+    /// \param[in] graph_enabled              enabling using of CUDA Graphs
+    cusparseSolverBackend(
+        int linear_solver_verbosity, int maxit, Scalar tolerance, unsigned int deviceID, bool graph_enabled = false);
 
     /// Destroy a cusparseSolver, and free memory
     ~cusparseSolverBackend();
