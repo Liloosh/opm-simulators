@@ -174,6 +174,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
     static bool isCaptured_3 = false;
     static bool isCaptured_4 = false;
     static bool isCaptured_5 = false;
+    static bool isCaptured_6 = false;
 
     cudaStream_t stream_2;
     cudaStreamCreate(&stream_2);
@@ -185,6 +186,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
     static cudaGraphExec_t graphExec_3 = nullptr;
     static cudaGraphExec_t graphExec_4 = nullptr;
     static cudaGraphExec_t graphExec_5 = nullptr;
+    static cudaGraphExec_t graphExec_6 = nullptr;
 
     if (wellContribs.getNumWells() > 0) {
         static_cast<WellContributionsCuda<Scalar>&>(wellContribs).setCudaStream(stream);
@@ -730,25 +732,74 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             static_cast<WellContributionsCuda<Scalar>&>(wellContribs).apply(d_s, d_t);
         }
 
+        if constexpr (enabled) {
+            cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_DEVICE);
+
+            if (isCaptured_6) {
+                cudaDeviceSynchronize();
+                cudaGraphLaunch(graphExec_6, stream);
+                cudaDeviceSynchronize();
+            } else {
+                cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+            }
+        }
+
         if constexpr (std::is_same_v<Scalar, float>) {
             cublasSdot(cublasHandle, n, d_t, 1, d_r, 1, &tmp1);
             cublasSdot(cublasHandle, n, d_t, 1, d_t, 1, &tmp2);
         } else {
-            cublasDdot(cublasHandle, n, d_t, 1, d_r, 1, &tmp1);
-            cublasDdot(cublasHandle, n, d_t, 1, d_t, 1, &tmp2);
+            if constexpr (enabled) {
+                if (!isCaptured_6) {
+                    cublasDdot(cublasHandle, n, d_t, 1, d_r, 1, tmp1_d);
+                    cublasDdot(cublasHandle, n, d_t, 1, d_t, 1, tmp2_d);
+                }
+            } else {
+                cublasDdot(cublasHandle, n, d_t, 1, d_r, 1, &tmp1);
+                cublasDdot(cublasHandle, n, d_t, 1, d_t, 1, &tmp2);
+            }
         }
 
-        omega = tmp1 / tmp2;
-        nomega = -omega;
-
         if constexpr (std::is_same_v<Scalar, float>) {
+            omega = tmp1 / tmp2;
+            nomega = -omega;
+
+
             cublasSaxpy(cublasHandle, n, &omega, d_s, 1, d_x, 1);
             cublasSaxpy(cublasHandle, n, &nomega, d_t, 1, d_r, 1);
             cublasSnrm2(cublasHandle, n, d_r, 1, &norm);
         } else {
-            cublasDaxpy(cublasHandle, n, &omega, d_s, 1, d_x, 1);
-            cublasDaxpy(cublasHandle, n, &nomega, d_t, 1, d_r, 1);
-            cublasDnrm2(cublasHandle, n, d_r, 1, &norm);
+            if constexpr (enabled) {
+                if (!isCaptured_6) {
+                    computeAlpha<<<1, 1, 0, stream>>>(omega_d, tmp1_d, tmp2_d);
+                    makeNegative<<<1, 1, 0, stream>>>(omega_d, nomega_d);
+
+                    cublasDaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
+                    cublasDaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
+                    cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+                }
+            } else {
+                omega = tmp1 / tmp2;
+                nomega = -omega;
+
+                cublasDaxpy(cublasHandle, n, &omega, d_s, 1, d_x, 1);
+                cublasDaxpy(cublasHandle, n, &nomega, d_t, 1, d_r, 1);
+                cublasDnrm2(cublasHandle, n, d_r, 1, &norm);
+            }
+        }
+
+        if constexpr (enabled) {
+            if (!isCaptured_6) {
+                cudaStreamEndCapture(stream, &graph);
+                cudaGraphInstantiate(&graphExec_6, graph, nullptr, nullptr, 0);
+                cudaGraphDestroy(graph);
+                isCaptured_6 = true;
+                cudaGraphLaunch(graphExec_6, stream);
+                cudaStreamSynchronize(stream);
+            }
+
+            cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_HOST);
+            cudaMemcpy(&norm, norm_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&omega, omega_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
         }
 
         if (norm < tolerance * norm_0) {
