@@ -68,6 +68,7 @@ private:
     // variables needed for graph
     Scalar *norm_0_d, *m_one_graph_const_d, *one_graph_const_d;
     Scalar *beta_d, *rho_d, *rhop_d, *alpha_d, *omega_d, *nomega_d;
+    Scalar *tmp1_d, *tmp2_d, *nalpha_d, *norm_d;
 
     bool analysis_done = false;
 
