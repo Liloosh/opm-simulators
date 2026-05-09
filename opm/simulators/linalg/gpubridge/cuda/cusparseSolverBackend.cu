@@ -71,7 +71,7 @@ computeBeta(Scalar* beta, Scalar* rho, Scalar* rhop, Scalar* alpha, Scalar* omeg
 
 template <class Scalar>
 __global__ void
-computeAlpha(Scalar* alpha, Scalar* rho, Scalar* tmp)
+computeDivision(Scalar* alpha, Scalar* rho, Scalar* tmp)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i == 0) {
@@ -134,6 +134,8 @@ cusparseSolverBackend<Scalar, block_size>::cusparseSolverBackend(
         cudaMemcpy(one_graph_const_d, &one_graph, sizeof(Scalar), cudaMemcpyHostToDevice);
 
         cudaMalloc((void**)&rho_d, sizeof(Scalar));
+        cudaMemcpy(rho_d, &one_graph, sizeof(Scalar), cudaMemcpyHostToDevice);
+
         cudaMalloc((void**)&rhop_d, sizeof(Scalar));
         cudaMalloc((void**)&alpha_d, sizeof(Scalar));
         cudaMalloc((void**)&omega_d, sizeof(Scalar));
@@ -154,6 +156,407 @@ cusparseSolverBackend<Scalar, block_size>::~cusparseSolverBackend()
 }
 
 template <class Scalar, unsigned int block_size>
+void
+cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
+{
+    Scalar zero = 0.0;
+    Scalar one = 1.0;
+    int n = N;
+
+    cudaGraph_t graph;
+
+    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        cusparseSbsrmv(cusparseHandle,
+                       order,
+                       operation,
+                       Nb,
+                       Nb,
+                       nnzb,
+                       &one,
+                       descr_M,
+                       d_bVals,
+                       d_bRows,
+                       d_bCols,
+                       block_size,
+                       d_x,
+                       &zero,
+                       d_r);
+
+        cublasSscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
+        cublasSaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
+        cublasScopy(cublasHandle, n, d_r, 1, d_rw, 1);
+        cublasScopy(cublasHandle, n, d_r, 1, d_p, 1);
+        cublasSnrm2(cublasHandle, n, d_r, 1, norm_0_d);
+    } else {
+        cusparseDbsrmv(cusparseHandle,
+                       order,
+                       operation,
+                       Nb,
+                       Nb,
+                       nnzb,
+                       &one,
+                       descr_M,
+                       d_bVals,
+                       d_bRows,
+                       d_bCols,
+                       block_size,
+                       d_x,
+                       &zero,
+                       d_r);
+
+        cublasDscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
+        cublasDaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
+        cublasDcopy(cublasHandle, n, d_r, 1, d_rw, 1);
+        cublasDcopy(cublasHandle, n, d_r, 1, d_p, 1);
+        cublasDnrm2(cublasHandle, n, d_r, 1, norm_0_d);
+    }
+
+    cudaStreamEndCapture(stream, &graph);
+    cudaGraphInstantiate(&graphExec_1, graph, nullptr, nullptr, 0);
+    cudaGraphDestroy(graph);
+}
+
+template <class Scalar, unsigned int block_size>
+void
+cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_2_create()
+{
+    int n = N;
+
+    cudaGraph_t graph;
+
+    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+    computeBeta<Scalar><<<1, 1, 0, stream>>>(beta_d, rho_d, rhop_d, alpha_d, omega_d);
+    makeNegative<<<1, 1, 0, stream>>>(omega_d, nomega_d);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        cublasSaxpy(cublasHandle, n, nomega_d, d_v, 1, d_p, 1);
+        cublasSscal(cublasHandle, n, beta_d, d_p, 1);
+        cublasSaxpy(cublasHandle, n, one_graph_const_d, d_r, 1, d_p, 1);
+    } else {
+        cublasDaxpy(cublasHandle, n, nomega_d, d_v, 1, d_p, 1);
+        cublasDscal(cublasHandle, n, beta_d, d_p, 1);
+        cublasDaxpy(cublasHandle, n, one_graph_const_d, d_r, 1, d_p, 1);
+    }
+
+    cudaStreamEndCapture(stream, &graph);
+    cudaGraphInstantiate(&graphExec_2, graph, nullptr, nullptr, 0);
+    cudaGraphDestroy(graph);
+}
+
+template <class Scalar, unsigned int block_size>
+void
+cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_3_create()
+{
+    Scalar zero = 0.0;
+    Scalar one = 1.0;
+
+    cudaGraph_t graph;
+
+    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        // apply ilu0
+        cusparseSbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_L,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_L,
+                              d_p,
+                              d_t,
+                              policy,
+                              d_buffer);
+        cusparseSbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_U,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_U,
+                              d_t,
+                              d_pw,
+                              policy,
+                              d_buffer);
+        // spmv
+        cusparseSbsrmv(cusparseHandle,
+                       order,
+                       operation,
+                       Nb,
+                       Nb,
+                       nnzb,
+                       &one,
+                       descr_M,
+                       d_bVals,
+                       d_bRows,
+                       d_bCols,
+                       block_size,
+                       d_pw,
+                       &zero,
+                       d_v);
+    } else {
+        // apply ilu0
+        cusparseDbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_L,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_L,
+                              d_p,
+                              d_t,
+                              policy,
+                              d_buffer);
+        cusparseDbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_U,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_U,
+                              d_t,
+                              d_pw,
+                              policy,
+                              d_buffer);
+        // spmv
+        cusparseDbsrmv(cusparseHandle,
+                       order,
+                       operation,
+                       Nb,
+                       Nb,
+                       nnzb,
+                       &one,
+                       descr_M,
+                       d_bVals,
+                       d_bRows,
+                       d_bCols,
+                       block_size,
+                       d_pw,
+                       &zero,
+                       d_v);
+    }
+
+    cudaStreamEndCapture(stream, &graph);
+    cudaGraphInstantiate(&graphExec_3, graph, nullptr, nullptr, 0);
+    cudaGraphDestroy(graph);
+}
+
+template <class Scalar, unsigned int block_size>
+void
+cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_4_create()
+{
+    int n = N;
+
+    cudaGraph_t graph;
+
+    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        cublasSdot(cublasHandle, n, d_rw, 1, d_v, 1, tmp1_d);
+    } else {
+        cublasDdot(cublasHandle, n, d_rw, 1, d_v, 1, tmp1_d);
+    }
+
+    computeDivision<<<1, 1, 0, stream>>>(alpha_d, rho_d, tmp1_d);
+    makeNegative<<<1, 1, 0, stream>>>(alpha_d, nalpha_d);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        cublasSaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
+        cublasSaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
+        cublasSnrm2(cublasHandle, n, d_r, 1, norm_d);
+    } else {
+        cublasDaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
+        cublasDaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
+        cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+    }
+
+    cudaStreamEndCapture(stream, &graph);
+    cudaGraphInstantiate(&graphExec_4, graph, nullptr, nullptr, 0);
+    cudaGraphDestroy(graph);
+}
+
+template <class Scalar, unsigned int block_size>
+void
+cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_5_create()
+{
+    Scalar zero = 0.0;
+    Scalar one = 1.0;
+
+    cudaGraph_t graph;
+
+    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        // apply ilu0
+        cusparseSbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_L,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_L,
+                              d_r,
+                              d_t,
+                              policy,
+                              d_buffer);
+
+        cusparseSbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_U,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_U,
+                              d_t,
+                              d_s,
+                              policy,
+                              d_buffer);
+
+        // spmv
+        cusparseSbsrmv(cusparseHandle,
+                       order,
+                       operation,
+                       Nb,
+                       Nb,
+                       nnzb,
+                       &one,
+                       descr_M,
+                       d_bVals,
+                       d_bRows,
+                       d_bCols,
+                       block_size,
+                       d_s,
+                       &zero,
+                       d_t);
+    } else {
+        // apply ilu0
+        cusparseDbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_L,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_L,
+                              d_r,
+                              d_t,
+                              policy,
+                              d_buffer);
+
+        cusparseDbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_U,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_U,
+                              d_t,
+                              d_s,
+                              policy,
+                              d_buffer);
+
+        // spmv
+        cusparseDbsrmv(cusparseHandle,
+                       order,
+                       operation,
+                       Nb,
+                       Nb,
+                       nnzb,
+                       &one,
+                       descr_M,
+                       d_bVals,
+                       d_bRows,
+                       d_bCols,
+                       block_size,
+                       d_s,
+                       &zero,
+                       d_t);
+    }
+
+    cudaStreamEndCapture(stream, &graph);
+    cudaGraphInstantiate(&graphExec_5, graph, nullptr, nullptr, 0);
+    cudaGraphDestroy(graph);
+}
+
+template <class Scalar, unsigned int block_size>
+void
+cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_6_create()
+{
+    int n = N;
+
+    cudaGraph_t graph;
+
+    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        cublasSdot(cublasHandle, n, d_t, 1, d_r, 1, tmp1_d);
+        cublasSdot(cublasHandle, n, d_t, 1, d_t, 1, tmp2_d);
+    } else {
+        cublasDdot(cublasHandle, n, d_t, 1, d_r, 1, tmp1_d);
+        cublasDdot(cublasHandle, n, d_t, 1, d_t, 1, tmp2_d);
+    }
+
+    computeDivision<<<1, 1, 0, stream>>>(omega_d, tmp1_d, tmp2_d);
+    makeNegative<<<1, 1, 0, stream>>>(omega_d, nomega_d);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        cublasSaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
+        cublasSaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
+        cublasSnrm2(cublasHandle, n, d_r, 1, norm_d);
+    } else {
+        cublasDaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
+        cublasDaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
+        cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+    }
+
+    cudaStreamEndCapture(stream, &graph);
+    cudaGraphInstantiate(&graphExec_6, graph, nullptr, nullptr, 0);
+    cudaGraphDestroy(graph);
+}
+
+template <class Scalar, unsigned int block_size>
 template <bool enabled>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res)
@@ -169,10 +572,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
     Scalar mone = -1.0;
     float it;
 
-    cudaGraph_t graph;
-
     if constexpr (enabled) {
-        cudaMemcpy(rho_d, &rho, sizeof(Scalar), cudaMemcpyHostToDevice);
         cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_DEVICE);
     }
 
@@ -180,17 +580,8 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
         static_cast<WellContributionsCuda<Scalar>&>(wellContribs).setCudaStream(stream);
     }
 
-    if constexpr (enabled) {
-        if (isCaptured_1) {
-            cudaGraphLaunch(graphExec_1, stream);
-        } else {
-            cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
-        }
-    }
-
-    if constexpr (std::is_same_v<Scalar, float>) {
-        if constexpr (enabled) {
-        } else {
+    if constexpr (!enabled) {
+        if constexpr (std::is_same_v<Scalar, float>) {
             cusparseSbsrmv(cusparseHandle,
                            order,
                            operation,
@@ -206,26 +597,6 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                            d_x,
                            &zero,
                            d_r);
-        }
-    } else {
-        if constexpr (enabled) {
-            if (!isCaptured_1) {
-                cusparseDbsrmv(cusparseHandle,
-                               order,
-                               operation,
-                               Nb,
-                               Nb,
-                               nnzb,
-                               &one,
-                               descr_M,
-                               d_bVals,
-                               d_bRows,
-                               d_bCols,
-                               block_size,
-                               d_x,
-                               &zero,
-                               d_r);
-            }
         } else {
             cusparseDbsrmv(cusparseHandle,
                            order,
@@ -243,26 +614,13 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                            &zero,
                            d_r);
         }
-    }
 
-    if constexpr (std::is_same_v<Scalar, float>) {
-        if constexpr (enabled) {
-        } else {
+        if constexpr (std::is_same_v<Scalar, float>) {
             cublasSscal(cublasHandle, n, &mone, d_r, 1);
             cublasSaxpy(cublasHandle, n, &one, d_b, 1, d_r, 1);
             cublasScopy(cublasHandle, n, d_r, 1, d_rw, 1);
             cublasScopy(cublasHandle, n, d_r, 1, d_p, 1);
             cublasSnrm2(cublasHandle, n, d_r, 1, &norm_0);
-        }
-    } else {
-        if constexpr (enabled) {
-            if (!isCaptured_1) {
-                cublasDscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
-                cublasDaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
-                cublasDcopy(cublasHandle, n, d_r, 1, d_rw, 1);
-                cublasDcopy(cublasHandle, n, d_r, 1, d_p, 1);
-                cublasDnrm2(cublasHandle, n, d_r, 1, norm_0_d);
-            }
         } else {
             cublasDscal(cublasHandle, n, &mone, d_r, 1);
             cublasDaxpy(cublasHandle, n, &one, d_b, 1, d_r, 1);
@@ -270,17 +628,12 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             cublasDcopy(cublasHandle, n, d_r, 1, d_p, 1);
             cublasDnrm2(cublasHandle, n, d_r, 1, &norm_0);
         }
-    }
-
-    if constexpr (enabled) {
+    } else {
         if (!isCaptured_1) {
-            cudaStreamEndCapture(stream, &graph);
-            cudaGraphInstantiate(&graphExec_1, graph, nullptr, nullptr, 0);
-            cudaGraphDestroy(graph);
+            gpu_pbicgstab_graph_1_create();
             isCaptured_1 = true;
-            cudaGraphLaunch(graphExec_1, stream);
         }
-
+        cudaGraphLaunch(graphExec_1, stream);
         cudaMemcpy(&norm_0, norm_0_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
     }
 
@@ -291,134 +644,99 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
     }
 
     for (it = 0.5; it < maxit; it += 0.5) {
-        if constexpr (std::is_same_v<Scalar, float>) {
-            cublasSdot(cublasHandle, n, d_rw, 1, d_r, 1, &rho);
-        } else {
-            if constexpr (enabled) {
-                cudaMemcpy(rhop_d, rho_d, sizeof(Scalar), cudaMemcpyDeviceToDevice);
-                cublasDdot(cublasHandle, n, d_rw, 1, d_r, 1, rho_d);
+        if constexpr (!enabled) {
+            rhop = rho;
+
+            if constexpr (std::is_same_v<Scalar, float>) {
+                cublasSdot(cublasHandle, n, d_rw, 1, d_r, 1, &rho);
             } else {
-                rhop = rho;
                 cublasDdot(cublasHandle, n, d_rw, 1, d_r, 1, &rho);
+            }
+        } else {
+            cudaMemcpy(rhop_d, rho_d, sizeof(Scalar), cudaMemcpyDeviceToDevice);
+
+            if constexpr (std::is_same_v<Scalar, float>) {
+                cublasSdot(cublasHandle, n, d_rw, 1, d_r, 1, rho_d);
+            } else {
+                cublasDdot(cublasHandle, n, d_rw, 1, d_r, 1, rho_d);
             }
         }
 
         if (it > 1) {
-            if constexpr (enabled) {
-                if (isCaptured_2) {
-                    cudaGraphLaunch(graphExec_2, stream);
-                } else {
-                    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
-                }
-            }
+            if constexpr (!enabled) {
+                beta = (rho / rhop) * (alpha / omega);
+                nomega = -omega;
 
-            if constexpr (std::is_same_v<Scalar, float>) {
-                if constexpr (enabled) {
-                    computeBeta<<<1, 1, 0, stream>>>(beta_d, rho_d, rhop_d, alpha_d, omega_d);
-                    makeNegative<<<1, 1, 0, stream>>>(omega_d, nomega_d);
-
-                    cublasSaxpy(cublasHandle, n, nomega_d, d_v, 1, d_p, 1);
-                    cublasSscal(cublasHandle, n, beta_d, d_p, 1);
-                    cublasSaxpy(cublasHandle, n, one_graph_const_d, d_r, 1, d_p, 1);
-                } else {
-                    beta = (rho / rhop) * (alpha / omega);
-                    nomega = -omega;
-
+                if constexpr (std::is_same_v<Scalar, float>) {
                     cublasSaxpy(cublasHandle, n, &nomega, d_v, 1, d_p, 1);
                     cublasSscal(cublasHandle, n, &beta, d_p, 1);
                     cublasSaxpy(cublasHandle, n, &one, d_r, 1, d_p, 1);
-                }
-            } else {
-                if constexpr (enabled) {
-                    if (!isCaptured_2) {
-                        computeBeta<<<1, 1, 0, stream>>>(beta_d, rho_d, rhop_d, alpha_d, omega_d);
-                        makeNegative<<<1, 1, 0, stream>>>(omega_d, nomega_d);
-
-                        cublasDaxpy(cublasHandle, n, nomega_d, d_v, 1, d_p, 1);
-                        cublasDscal(cublasHandle, n, beta_d, d_p, 1);
-                        cublasDaxpy(cublasHandle, n, one_graph_const_d, d_r, 1, d_p, 1);
-                    }
                 } else {
-                    beta = (rho / rhop) * (alpha / omega);
-                    nomega = -omega;
-
                     cublasDaxpy(cublasHandle, n, &nomega, d_v, 1, d_p, 1);
                     cublasDscal(cublasHandle, n, &beta, d_p, 1);
                     cublasDaxpy(cublasHandle, n, &one, d_r, 1, d_p, 1);
                 }
-            }
-
-            if constexpr (enabled) {
-                if (!isCaptured_2) {
-                    cudaStreamEndCapture(stream, &graph);
-                    cudaGraphInstantiate(&graphExec_2, graph, nullptr, nullptr, 0);
-                    cudaGraphDestroy(graph);
-                    isCaptured_2 = true;
-                    cudaGraphLaunch(graphExec_2, stream);
-                }
-            }
-        }
-
-        if constexpr (enabled) {
-            if (isCaptured_3) {
-                cudaGraphLaunch(graphExec_3, stream);
             } else {
-                cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+                if (!isCaptured_2) {
+                    gpu_pbicgstab_graph_2_create();
+                    isCaptured_2 = true;
+                }
+                cudaGraphLaunch(graphExec_2, stream);
             }
         }
 
-        if constexpr (std::is_same_v<Scalar, float>) {
-            // apply ilu0
-            cusparseSbsrsv2_solve(cusparseHandle,
-                                  order,
-                                  operation,
-                                  Nb,
-                                  nnzbs_prec,
-                                  &one,
-                                  descr_L,
-                                  d_mVals,
-                                  d_mRows,
-                                  d_mCols,
-                                  block_size,
-                                  info_L,
-                                  d_p,
-                                  d_t,
-                                  policy,
-                                  d_buffer);
-            cusparseSbsrsv2_solve(cusparseHandle,
-                                  order,
-                                  operation,
-                                  Nb,
-                                  nnzbs_prec,
-                                  &one,
-                                  descr_U,
-                                  d_mVals,
-                                  d_mRows,
-                                  d_mCols,
-                                  block_size,
-                                  info_U,
-                                  d_t,
-                                  d_pw,
-                                  policy,
-                                  d_buffer);
-            // spmv
-            cusparseSbsrmv(cusparseHandle,
-                           order,
-                           operation,
-                           Nb,
-                           Nb,
-                           nnzb,
-                           &one,
-                           descr_M,
-                           d_bVals,
-                           d_bRows,
-                           d_bCols,
-                           block_size,
-                           d_pw,
-                           &zero,
-                           d_v);
-        } else {
-            if (!isCaptured_3) {
+        if constexpr (!enabled) {
+            if constexpr (std::is_same_v<Scalar, float>) {
+                // apply ilu0
+                cusparseSbsrsv2_solve(cusparseHandle,
+                                      order,
+                                      operation,
+                                      Nb,
+                                      nnzbs_prec,
+                                      &one,
+                                      descr_L,
+                                      d_mVals,
+                                      d_mRows,
+                                      d_mCols,
+                                      block_size,
+                                      info_L,
+                                      d_p,
+                                      d_t,
+                                      policy,
+                                      d_buffer);
+                cusparseSbsrsv2_solve(cusparseHandle,
+                                      order,
+                                      operation,
+                                      Nb,
+                                      nnzbs_prec,
+                                      &one,
+                                      descr_U,
+                                      d_mVals,
+                                      d_mRows,
+                                      d_mCols,
+                                      block_size,
+                                      info_U,
+                                      d_t,
+                                      d_pw,
+                                      policy,
+                                      d_buffer);
+                // spmv
+                cusparseSbsrmv(cusparseHandle,
+                               order,
+                               operation,
+                               Nb,
+                               Nb,
+                               nnzb,
+                               &one,
+                               descr_M,
+                               d_bVals,
+                               d_bRows,
+                               d_bCols,
+                               block_size,
+                               d_pw,
+                               &zero,
+                               d_v);
+            } else {
                 // apply ilu0
                 cusparseDbsrsv2_solve(cusparseHandle,
                                       order,
@@ -469,16 +787,12 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                                &zero,
                                d_v);
             }
-        }
-
-        if constexpr (enabled) {
+        } else {
             if (!isCaptured_3) {
-                cudaStreamEndCapture(stream, &graph);
-                cudaGraphInstantiate(&graphExec_3, graph, nullptr, nullptr, 0);
-                cudaGraphDestroy(graph);
+                gpu_pbicgstab_graph_3_create();
                 isCaptured_3 = true;
-                cudaGraphLaunch(graphExec_3, stream);
             }
+            cudaGraphLaunch(graphExec_3, stream);
         }
 
         // apply wellContributions
@@ -486,61 +800,31 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             static_cast<WellContributionsCuda<Scalar>&>(wellContribs).apply(d_pw, d_v);
         }
 
-        if constexpr (enabled) {
-            if (isCaptured_4) {
-                cudaGraphLaunch(graphExec_4, stream);
-            } else {
-                cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
-            }
-        }
-
-        if constexpr (std::is_same_v<Scalar, float>) {
-            cublasSdot(cublasHandle, n, d_rw, 1, d_v, 1, &tmp1);
-        } else {
-            if constexpr (enabled) {
-                if (!isCaptured_4) {
-                    cublasDdot(cublasHandle, n, d_rw, 1, d_v, 1, tmp1_d);
-                }
+        if constexpr (!enabled) {
+            if constexpr (std::is_same_v<Scalar, float>) {
+                cublasSdot(cublasHandle, n, d_rw, 1, d_v, 1, &tmp1);
             } else {
                 cublasDdot(cublasHandle, n, d_rw, 1, d_v, 1, &tmp1);
             }
-        }
 
-        if constexpr (std::is_same_v<Scalar, float>) {
             alpha = rho / tmp1;
             nalpha = -alpha;
 
-            cublasSaxpy(cublasHandle, n, &nalpha, d_v, 1, d_r, 1);
-            cublasSaxpy(cublasHandle, n, &alpha, d_pw, 1, d_x, 1);
-            cublasSnrm2(cublasHandle, n, d_r, 1, &norm);
-        } else {
-            if constexpr (enabled) {
-                if (!isCaptured_4) {
-                    computeAlpha<<<1, 1, 0, stream>>>(alpha_d, rho_d, tmp1_d);
-                    makeNegative<<<1, 1, 0, stream>>>(alpha_d, nalpha_d);
-
-                    cublasDaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
-                    cublasDaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
-                    cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
-                }
+            if constexpr (std::is_same_v<Scalar, float>) {
+                cublasSaxpy(cublasHandle, n, &nalpha, d_v, 1, d_r, 1);
+                cublasSaxpy(cublasHandle, n, &alpha, d_pw, 1, d_x, 1);
+                cublasSnrm2(cublasHandle, n, d_r, 1, &norm);
             } else {
-                alpha = rho / tmp1;
-                nalpha = -alpha;
-
                 cublasDaxpy(cublasHandle, n, &nalpha, d_v, 1, d_r, 1);
                 cublasDaxpy(cublasHandle, n, &alpha, d_pw, 1, d_x, 1);
                 cublasDnrm2(cublasHandle, n, d_r, 1, &norm);
             }
-        }
-
-        if constexpr (enabled) {
+        } else {
             if (!isCaptured_4) {
-                cudaStreamEndCapture(stream, &graph);
-                cudaGraphInstantiate(&graphExec_4, graph, nullptr, nullptr, 0);
-                cudaGraphDestroy(graph);
+                gpu_pbicgstab_graph_4_create();
                 isCaptured_4 = true;
-                cudaGraphLaunch(graphExec_4, stream);
             }
+            cudaGraphLaunch(graphExec_4, stream);
             cudaMemcpy(&norm, norm_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
         }
 
@@ -550,68 +834,60 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
 
         it += 0.5;
 
-        if constexpr (enabled) {
-            if (isCaptured_5) {
-                cudaGraphLaunch(graphExec_5, stream);
+        if constexpr (!enabled) {
+            if constexpr (std::is_same_v<Scalar, float>) {
+                // apply ilu0
+                cusparseSbsrsv2_solve(cusparseHandle,
+                                      order,
+                                      operation,
+                                      Nb,
+                                      nnzbs_prec,
+                                      &one,
+                                      descr_L,
+                                      d_mVals,
+                                      d_mRows,
+                                      d_mCols,
+                                      block_size,
+                                      info_L,
+                                      d_r,
+                                      d_t,
+                                      policy,
+                                      d_buffer);
+
+                cusparseSbsrsv2_solve(cusparseHandle,
+                                      order,
+                                      operation,
+                                      Nb,
+                                      nnzbs_prec,
+                                      &one,
+                                      descr_U,
+                                      d_mVals,
+                                      d_mRows,
+                                      d_mCols,
+                                      block_size,
+                                      info_U,
+                                      d_t,
+                                      d_s,
+                                      policy,
+                                      d_buffer);
+
+                // spmv
+                cusparseSbsrmv(cusparseHandle,
+                               order,
+                               operation,
+                               Nb,
+                               Nb,
+                               nnzb,
+                               &one,
+                               descr_M,
+                               d_bVals,
+                               d_bRows,
+                               d_bCols,
+                               block_size,
+                               d_s,
+                               &zero,
+                               d_t);
             } else {
-                cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
-            }
-        }
-
-        if constexpr (std::is_same_v<Scalar, float>) {
-            // apply ilu0
-            cusparseSbsrsv2_solve(cusparseHandle,
-                                  order,
-                                  operation,
-                                  Nb,
-                                  nnzbs_prec,
-                                  &one,
-                                  descr_L,
-                                  d_mVals,
-                                  d_mRows,
-                                  d_mCols,
-                                  block_size,
-                                  info_L,
-                                  d_r,
-                                  d_t,
-                                  policy,
-                                  d_buffer);
-
-            cusparseSbsrsv2_solve(cusparseHandle,
-                                  order,
-                                  operation,
-                                  Nb,
-                                  nnzbs_prec,
-                                  &one,
-                                  descr_U,
-                                  d_mVals,
-                                  d_mRows,
-                                  d_mCols,
-                                  block_size,
-                                  info_U,
-                                  d_t,
-                                  d_s,
-                                  policy,
-                                  d_buffer);
-
-            // spmv
-            cusparseSbsrmv(cusparseHandle,
-                           order,
-                           operation,
-                           Nb,
-                           Nb,
-                           nnzb,
-                           &one,
-                           descr_M,
-                           d_bVals,
-                           d_bRows,
-                           d_bCols,
-                           block_size,
-                           d_s,
-                           &zero,
-                           d_t);
-        } else {
-            if (!isCaptured_5) {
                 // apply ilu0
                 cusparseDbsrsv2_solve(cusparseHandle,
                                       order,
@@ -664,16 +940,13 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                                &zero,
                                d_t);
             }
-        }
-
-        if constexpr (enabled) {
+        } else {
             if (!isCaptured_5) {
-                cudaStreamEndCapture(stream, &graph);
-                cudaGraphInstantiate(&graphExec_5, graph, nullptr, nullptr, 0);
-                cudaGraphDestroy(graph);
+                gpu_pbicgstab_graph_5_create();
                 isCaptured_5 = true;
-                cudaGraphLaunch(graphExec_5, stream);
             }
+            cudaGraphLaunch(graphExec_5, stream);
+            cudaMemcpy(&norm, norm_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
         }
 
         // apply wellContributions
@@ -681,69 +954,34 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             static_cast<WellContributionsCuda<Scalar>&>(wellContribs).apply(d_s, d_t);
         }
 
-        if constexpr (enabled) {
-
-            if (isCaptured_6) {
-                cudaDeviceSynchronize();
-                cudaGraphLaunch(graphExec_6, stream);
-                cudaDeviceSynchronize();
-            } else {
-                cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
-            }
-        }
-
-        if constexpr (std::is_same_v<Scalar, float>) {
-            cublasSdot(cublasHandle, n, d_t, 1, d_r, 1, &tmp1);
-            cublasSdot(cublasHandle, n, d_t, 1, d_t, 1, &tmp2);
-        } else {
-            if constexpr (enabled) {
-                if (!isCaptured_6) {
-                    cublasDdot(cublasHandle, n, d_t, 1, d_r, 1, tmp1_d);
-                    cublasDdot(cublasHandle, n, d_t, 1, d_t, 1, tmp2_d);
-                }
+        if constexpr (!enabled) {
+            if constexpr (std::is_same_v<Scalar, float>) {
+                cublasSdot(cublasHandle, n, d_t, 1, d_r, 1, &tmp1);
+                cublasSdot(cublasHandle, n, d_t, 1, d_t, 1, &tmp2);
             } else {
                 cublasDdot(cublasHandle, n, d_t, 1, d_r, 1, &tmp1);
                 cublasDdot(cublasHandle, n, d_t, 1, d_t, 1, &tmp2);
             }
-        }
 
-        if constexpr (std::is_same_v<Scalar, float>) {
             omega = tmp1 / tmp2;
             nomega = -omega;
 
-
-            cublasSaxpy(cublasHandle, n, &omega, d_s, 1, d_x, 1);
-            cublasSaxpy(cublasHandle, n, &nomega, d_t, 1, d_r, 1);
-            cublasSnrm2(cublasHandle, n, d_r, 1, &norm);
-        } else {
-            if constexpr (enabled) {
-                if (!isCaptured_6) {
-                    computeAlpha<<<1, 1, 0, stream>>>(omega_d, tmp1_d, tmp2_d);
-                    makeNegative<<<1, 1, 0, stream>>>(omega_d, nomega_d);
-
-                    cublasDaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
-                    cublasDaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
-                    cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
-                }
+            if constexpr (std::is_same_v<Scalar, float>) {
+                cublasSaxpy(cublasHandle, n, &omega, d_s, 1, d_x, 1);
+                cublasSaxpy(cublasHandle, n, &nomega, d_t, 1, d_r, 1);
+                cublasSnrm2(cublasHandle, n, d_r, 1, &norm);
             } else {
-                omega = tmp1 / tmp2;
-                nomega = -omega;
-
                 cublasDaxpy(cublasHandle, n, &omega, d_s, 1, d_x, 1);
                 cublasDaxpy(cublasHandle, n, &nomega, d_t, 1, d_r, 1);
                 cublasDnrm2(cublasHandle, n, d_r, 1, &norm);
             }
-        }
-
-        if constexpr (enabled) {
+        } else {
             if (!isCaptured_6) {
-                cudaStreamEndCapture(stream, &graph);
-                cudaGraphInstantiate(&graphExec_6, graph, nullptr, nullptr, 0);
-                cudaGraphDestroy(graph);
+                gpu_pbicgstab_graph_6_create();
                 isCaptured_6 = true;
-                cudaGraphLaunch(graphExec_6, stream);
             }
 
+            cudaGraphLaunch(graphExec_6, stream);
             cudaMemcpy(&norm, norm_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
         }
 
@@ -756,6 +994,10 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             out << "it: " << it << std::scientific << ", norm: " << norm;
             OpmLog::info(out.str());
         }
+    }
+
+    if constexpr (enabled) {
+        cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_HOST);
     }
 
     res.iterations = std::min(it, (float)maxit);

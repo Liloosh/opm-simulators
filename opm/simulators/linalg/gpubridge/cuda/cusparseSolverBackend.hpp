@@ -84,6 +84,13 @@ private:
     cudaGraphExec_t graphExec_5 = nullptr;
     cudaGraphExec_t graphExec_6 = nullptr;
 
+    void gpu_pbicgstab_graph_1_create();
+    void gpu_pbicgstab_graph_2_create();
+    void gpu_pbicgstab_graph_3_create();
+    void gpu_pbicgstab_graph_4_create();
+    void gpu_pbicgstab_graph_5_create();
+    void gpu_pbicgstab_graph_6_create();
+
     bool analysis_done = false;
 
     bool useJacMatrix = false;
