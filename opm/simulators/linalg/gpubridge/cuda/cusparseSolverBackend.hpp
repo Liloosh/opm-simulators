@@ -70,6 +70,20 @@ private:
     Scalar *beta_d, *rho_d, *rhop_d, *alpha_d, *omega_d, *nomega_d;
     Scalar *tmp1_d, *tmp2_d, *nalpha_d, *norm_d;
 
+    bool isCaptured_1 = false;
+    bool isCaptured_2 = false;
+    bool isCaptured_3 = false;
+    bool isCaptured_4 = false;
+    bool isCaptured_5 = false;
+    bool isCaptured_6 = false;
+
+    cudaGraphExec_t graphExec_1 = nullptr;
+    cudaGraphExec_t graphExec_2 = nullptr;
+    cudaGraphExec_t graphExec_3 = nullptr;
+    cudaGraphExec_t graphExec_4 = nullptr;
+    cudaGraphExec_t graphExec_5 = nullptr;
+    cudaGraphExec_t graphExec_6 = nullptr;
+
     bool analysis_done = false;
 
     bool useJacMatrix = false;

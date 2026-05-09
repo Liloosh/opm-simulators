@@ -169,35 +169,20 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
     Scalar mone = -1.0;
     float it;
 
-    static bool isCaptured_1 = false;
-    static bool isCaptured_2 = false;
-    static bool isCaptured_3 = false;
-    static bool isCaptured_4 = false;
-    static bool isCaptured_5 = false;
-    static bool isCaptured_6 = false;
-
-    cudaStream_t stream_2;
-    cudaStreamCreate(&stream_2);
-
     cudaGraph_t graph;
 
-    static cudaGraphExec_t graphExec_1 = nullptr;
-    static cudaGraphExec_t graphExec_2 = nullptr;
-    static cudaGraphExec_t graphExec_3 = nullptr;
-    static cudaGraphExec_t graphExec_4 = nullptr;
-    static cudaGraphExec_t graphExec_5 = nullptr;
-    static cudaGraphExec_t graphExec_6 = nullptr;
+    if constexpr (enabled) {
+        cudaMemcpy(rho_d, &rho, sizeof(Scalar), cudaMemcpyHostToDevice);
+        cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_DEVICE);
+    }
 
     if (wellContribs.getNumWells() > 0) {
         static_cast<WellContributionsCuda<Scalar>&>(wellContribs).setCudaStream(stream);
     }
 
     if constexpr (enabled) {
-        cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_DEVICE);
-
         if (isCaptured_1) {
             cudaGraphLaunch(graphExec_1, stream);
-            cudaStreamSynchronize(stream);
         } else {
             cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
         }
@@ -294,12 +279,9 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             cudaGraphDestroy(graph);
             isCaptured_1 = true;
             cudaGraphLaunch(graphExec_1, stream);
-            cudaStreamSynchronize(stream);
         }
 
         cudaMemcpy(&norm_0, norm_0_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
-        cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_HOST);
-        cudaStreamSynchronize(stream);
     }
 
     if (verbosity > 1) {
@@ -309,33 +291,22 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
     }
 
     for (it = 0.5; it < maxit; it += 0.5) {
-        rhop = rho;
         if constexpr (std::is_same_v<Scalar, float>) {
             cublasSdot(cublasHandle, n, d_rw, 1, d_r, 1, &rho);
         } else {
-            cublasDdot(cublasHandle, n, d_rw, 1, d_r, 1, &rho);
+            if constexpr (enabled) {
+                cudaMemcpy(rhop_d, rho_d, sizeof(Scalar), cudaMemcpyDeviceToDevice);
+                cublasDdot(cublasHandle, n, d_rw, 1, d_r, 1, rho_d);
+            } else {
+                rhop = rho;
+                cublasDdot(cublasHandle, n, d_rw, 1, d_r, 1, &rho);
+            }
         }
-
-        cudaDeviceSynchronize();
 
         if (it > 1) {
             if constexpr (enabled) {
-                double tmp = omega;
-                double tmp_1 = rho;
-                double tmp_2 = rhop;
-                double tmp3 = alpha;
-                cudaMemcpy(omega_d, &tmp, sizeof(Scalar), cudaMemcpyHostToDevice);
-                cudaMemcpy(rho_d, &tmp_1, sizeof(Scalar), cudaMemcpyHostToDevice);
-                cudaMemcpy(rhop_d, &tmp_2, sizeof(Scalar), cudaMemcpyHostToDevice);
-                cudaMemcpy(alpha_d, &tmp3, sizeof(Scalar), cudaMemcpyHostToDevice);
-                cudaDeviceSynchronize();
-
-                cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_DEVICE);
-
                 if (isCaptured_2) {
-                    cudaDeviceSynchronize();
                     cudaGraphLaunch(graphExec_2, stream);
-                    cudaDeviceSynchronize();
                 } else {
                     cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
                 }
@@ -383,21 +354,14 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                     cudaGraphInstantiate(&graphExec_2, graph, nullptr, nullptr, 0);
                     cudaGraphDestroy(graph);
                     isCaptured_2 = true;
-                    cudaDeviceSynchronize();
                     cudaGraphLaunch(graphExec_2, stream);
-                    cudaDeviceSynchronize();
                 }
-
-                cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_HOST);
-                cudaDeviceSynchronize();
             }
         }
 
         if constexpr (enabled) {
             if (isCaptured_3) {
-                cudaDeviceSynchronize();
                 cudaGraphLaunch(graphExec_3, stream);
-                cudaDeviceSynchronize();
             } else {
                 cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
             }
@@ -514,7 +478,6 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                 cudaGraphDestroy(graph);
                 isCaptured_3 = true;
                 cudaGraphLaunch(graphExec_3, stream);
-                cudaStreamSynchronize(stream);
             }
         }
 
@@ -524,14 +487,8 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
         }
 
         if constexpr (enabled) {
-            cudaDeviceSynchronize();
-            cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_DEVICE);
-            cudaMemcpy(rho_d, &rho, sizeof(Scalar), cudaMemcpyHostToDevice);
-
             if (isCaptured_4) {
-                cudaDeviceSynchronize();
                 cudaGraphLaunch(graphExec_4, stream);
-                cudaDeviceSynchronize();
             } else {
                 cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
             }
@@ -582,14 +539,9 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                 cudaGraphInstantiate(&graphExec_4, graph, nullptr, nullptr, 0);
                 cudaGraphDestroy(graph);
                 isCaptured_4 = true;
-                cudaDeviceSynchronize();
                 cudaGraphLaunch(graphExec_4, stream);
-                cudaDeviceSynchronize();
             }
             cudaMemcpy(&norm, norm_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
-            cudaMemcpy(&alpha, alpha_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
-            cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_HOST);
-            cudaDeviceSynchronize();
         }
 
         if (norm < tolerance * norm_0) {
@@ -600,9 +552,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
 
         if constexpr (enabled) {
             if (isCaptured_5) {
-                cudaDeviceSynchronize();
                 cudaGraphLaunch(graphExec_5, stream);
-                cudaDeviceSynchronize();
             } else {
                 cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
             }
@@ -723,7 +673,6 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                 cudaGraphDestroy(graph);
                 isCaptured_5 = true;
                 cudaGraphLaunch(graphExec_5, stream);
-                cudaStreamSynchronize(stream);
             }
         }
 
@@ -733,7 +682,6 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
         }
 
         if constexpr (enabled) {
-            cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_DEVICE);
 
             if (isCaptured_6) {
                 cudaDeviceSynchronize();
@@ -794,12 +742,9 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                 cudaGraphDestroy(graph);
                 isCaptured_6 = true;
                 cudaGraphLaunch(graphExec_6, stream);
-                cudaStreamSynchronize(stream);
             }
 
-            cublasSetPointerMode(cublasHandle, CUBLAS_POINTER_MODE_HOST);
             cudaMemcpy(&norm, norm_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
-            cudaMemcpy(&omega, omega_d, sizeof(Scalar), cudaMemcpyDeviceToHost);
         }
 
         if (norm < tolerance * norm_0) {
@@ -825,8 +770,6 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             << ", time per iteration: " << res.elapsed / it << ", iterations: " << it;
         OpmLog::info(out.str());
     }
-
-    cudaStreamDestroy(stream_2);
 }
 
 template <class Scalar, unsigned int block_size>
@@ -907,6 +850,7 @@ cusparseSolverBackend<Scalar, block_size>::finalize()
 
         if (graph_enabled) {
             cudaFree(norm_0_d);
+            cudaFree(norm_d);
             cudaFree(m_one_graph_const_d);
             cudaFree(one_graph_const_d);
 
@@ -914,8 +858,19 @@ cusparseSolverBackend<Scalar, block_size>::finalize()
             cudaFree(omega_d);
             cudaFree(nomega_d);
             cudaFree(alpha_d);
+            cudaFree(nalpha_d);
             cudaFree(rho_d);
             cudaFree(rhop_d);
+
+            cudaFree(tmp1_d);
+            cudaFree(tmp2_d);
+
+            cudaGraphExecDestroy(graphExec_1);
+            cudaGraphExecDestroy(graphExec_2);
+            cudaGraphExecDestroy(graphExec_3);
+            cudaGraphExecDestroy(graphExec_4);
+            cudaGraphExecDestroy(graphExec_5);
+            cudaGraphExecDestroy(graphExec_6);
         }
 
         cudaFree(d_bVals);
