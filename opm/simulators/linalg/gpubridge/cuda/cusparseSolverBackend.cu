@@ -90,12 +90,40 @@ makeNegative(Scalar* src, Scalar* dest)
     }
 }
 
+template <typename Scalar>
+__global__ void
+fusedVectorUpdate(
+    int n, const Scalar* m_one_ptr, const Scalar* one_ptr, const Scalar* d_b, Scalar* d_r, Scalar* d_rw, Scalar* d_p)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (i < n) {
+        Scalar r_val = d_r[i];
+        Scalar b_val = d_b[i];
+
+        Scalar m_one = *m_one_ptr;
+        Scalar one = *one_ptr;
+
+        r_val = (m_one * r_val) + (one * b_val);
+
+        d_r[i] = r_val;
+        d_rw[i] = r_val;
+        d_p[i] = r_val;
+    }
+}
+
 template <class Scalar, unsigned int block_size>
-cusparseSolverBackend<Scalar, block_size>::cusparseSolverBackend(
-    int verbosity_, int maxit_, Scalar tolerance_, unsigned int deviceID_, bool graph_enabled_, bool graph_viz_enabled_)
+cusparseSolverBackend<Scalar, block_size>::cusparseSolverBackend(int verbosity_,
+                                                                 int maxit_,
+                                                                 Scalar tolerance_,
+                                                                 unsigned int deviceID_,
+                                                                 bool graph_enabled_,
+                                                                 bool graph_viz_enabled_,
+                                                                 bool fuse_vector_)
     : Base(verbosity_, maxit_, tolerance_, deviceID_)
     , graph_enabled(graph_enabled_)
     , graph_viz_enabled(graph_viz_enabled_)
+    , fuse_vector(fuse_vector_)
 {
     // initialize CUDA device, stream and libraries
 
@@ -157,7 +185,7 @@ cusparseSolverBackend<Scalar, block_size>::~cusparseSolverBackend()
 }
 
 template <class Scalar, unsigned int block_size>
-template <bool viz>
+template <bool viz, bool fuse>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
 {
@@ -186,10 +214,19 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
                        &zero,
                        d_r);
 
-        cublasSscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
-        cublasSaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
-        cublasScopy(cublasHandle, n, d_r, 1, d_rw, 1);
-        cublasScopy(cublasHandle, n, d_r, 1, d_p, 1);
+        if constexpr (fuse) {
+            cublasSscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
+            cublasSaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
+            cublasScopy(cublasHandle, n, d_r, 1, d_rw, 1);
+            cublasScopy(cublasHandle, n, d_r, 1, d_p, 1);
+        } else {
+            int threadsPerBlock = 256;
+            int blocksPerGrid = (n + threadsPerBlock - 1) / threadsPerBlock;
+
+            fusedVectorUpdate<Scalar><<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
+                n, m_one_graph_const_d, one_graph_const_d, d_b, d_r, d_rw, d_p);
+        }
+
         cublasSnrm2(cublasHandle, n, d_r, 1, norm_0_d);
     } else {
         cusparseDbsrmv(cusparseHandle,
@@ -208,10 +245,19 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
                        &zero,
                        d_r);
 
-        cublasDscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
-        cublasDaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
-        cublasDcopy(cublasHandle, n, d_r, 1, d_rw, 1);
-        cublasDcopy(cublasHandle, n, d_r, 1, d_p, 1);
+        if constexpr (fuse) {
+            cublasDscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
+            cublasDaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
+            cublasDcopy(cublasHandle, n, d_r, 1, d_rw, 1);
+            cublasDcopy(cublasHandle, n, d_r, 1, d_p, 1);
+        } else {
+            int threadsPerBlock = 256;
+            int blocksPerGrid = (n + threadsPerBlock - 1) / threadsPerBlock;
+
+            fusedVectorUpdate<Scalar><<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
+                n, m_one_graph_const_d, one_graph_const_d, d_b, d_r, d_rw, d_p);
+        }
+
         cublasDnrm2(cublasHandle, n, d_r, 1, norm_0_d);
     }
 
@@ -594,7 +640,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_6_create()
 }
 
 template <class Scalar, unsigned int block_size>
-template <bool enabled, bool viz>
+template <bool enabled, bool viz, bool fuse>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res)
 {
@@ -667,11 +713,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
         }
     } else {
         if (!isCaptured_1) {
-            if constexpr (viz) {
-                gpu_pbicgstab_graph_1_create<true>();
-            } else {
-                gpu_pbicgstab_graph_1_create<false>();
-            }
+            gpu_pbicgstab_graph_1_create<viz, fuse>();
             isCaptured_1 = true;
         }
         cudaGraphLaunch(graphExec_1, stream);
@@ -719,11 +761,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                 }
             } else {
                 if (!isCaptured_2) {
-                    if constexpr (viz) {
-                        gpu_pbicgstab_graph_2_create<true>();
-                    } else {
-                        gpu_pbicgstab_graph_2_create<false>();
-                    }
+                    gpu_pbicgstab_graph_2_create<viz>();
                     isCaptured_2 = true;
                 }
                 cudaGraphLaunch(graphExec_2, stream);
@@ -834,11 +872,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_3) {
-                if constexpr (viz) {
-                    gpu_pbicgstab_graph_3_create<true>();
-                } else {
-                    gpu_pbicgstab_graph_3_create<false>();
-                }
+                gpu_pbicgstab_graph_3_create<viz>();
                 isCaptured_3 = true;
             }
             cudaGraphLaunch(graphExec_3, stream);
@@ -870,11 +904,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_4) {
-                if constexpr (viz) {
-                    gpu_pbicgstab_graph_4_create<true>();
-                } else {
-                    gpu_pbicgstab_graph_4_create<false>();
-                }
+                gpu_pbicgstab_graph_4_create<viz>();
                 isCaptured_4 = true;
             }
             cudaGraphLaunch(graphExec_4, stream);
@@ -995,11 +1025,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_5) {
-                if constexpr (viz) {
-                    gpu_pbicgstab_graph_5_create<true>();
-                } else {
-                    gpu_pbicgstab_graph_5_create<false>();
-                }
+                gpu_pbicgstab_graph_5_create<viz>();
                 isCaptured_5 = true;
             }
             cudaGraphLaunch(graphExec_5, stream);
@@ -1034,11 +1060,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_6) {
-                if constexpr (viz) {
-                    gpu_pbicgstab_graph_6_create<true>();
-                } else {
-                    gpu_pbicgstab_graph_6_create<false>();
-                }
+                gpu_pbicgstab_graph_6_create<viz>();
                 isCaptured_6 = true;
             }
 
@@ -1583,10 +1605,14 @@ cusparseSolverBackend<Scalar, block_size>::solve_system(WellContributions<Scalar
 {
     // actually solve
     if (graph_enabled) {
-        if (graph_viz_enabled) {
-            gpu_pbicgstab<true, true>(wellContribs, res);
+        if (graph_viz_enabled && fuse_vector) {
+            gpu_pbicgstab<true, true, true>(wellContribs, res);
+        } else if (graph_viz_enabled && !fuse_vector) {
+            gpu_pbicgstab<true, true, false>(wellContribs, res);
+        } else if (!graph_viz_enabled && fuse_vector) {
+            gpu_pbicgstab<true, false, true>(wellContribs, res);
         } else {
-            gpu_pbicgstab<true, false>(wellContribs, res);
+            gpu_pbicgstab<true, false, false>(wellContribs, res);
         }
     } else {
         gpu_pbicgstab<false>(wellContribs, res);

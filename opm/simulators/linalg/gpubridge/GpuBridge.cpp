@@ -78,16 +78,23 @@ GpuBridge<BridgeMatrix, BridgeVector, block_size>::GpuBridge(std::string acceler
 #if HAVE_CUDA
         bool isCudaGraphEnabled = accelerator_mode.find("graph") != std::string::npos;
         bool isCudaGraphVizEnabled = accelerator_mode.find("viz") != std::string::npos;
+        bool isFuseVectorUpdateEnabled = accelerator_mode.find("fuse") != std::string::npos;
 
         std::ostringstream cusparsaeGraphEnabledout;
         cusparsaeGraphEnabledout << "CUDA Graph Enabled: " << isCudaGraphEnabled
-                                 << "Visualization Enabled: " << isCudaGraphVizEnabled << "\n";
+                                 << "\nCUDA Graph Visualization Enabled: " << isCudaGraphVizEnabled
+                                 << "\nFuse Vector Update Enabled: " << isFuseVectorUpdateEnabled << "\n";
         OpmLog::info(cusparsaeGraphEnabledout.str());
 
         use_gpu = true;
         using CU = Accelerator::cusparseSolverBackend<Scalar, block_size>;
-        backend = std::make_unique<CU>(
-            linear_solver_verbosity, maxit, tolerance, deviceID, isCudaGraphEnabled, isCudaGraphVizEnabled);
+        backend = std::make_unique<CU>(linear_solver_verbosity,
+                                       maxit,
+                                       tolerance,
+                                       deviceID,
+                                       isCudaGraphEnabled,
+                                       isCudaGraphVizEnabled,
+                                       isFuseVectorUpdateEnabled);
 #else
         OPM_THROW(std::logic_error, "Error cusparseSolver was chosen, but CUDA was not found by CMake");
 #endif

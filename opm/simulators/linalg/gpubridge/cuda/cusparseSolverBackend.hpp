@@ -65,6 +65,7 @@ private:
 
     const bool graph_enabled;
     const bool graph_viz_enabled;
+    const bool fuse_vector;
 
     // variables needed for graph
     Scalar *norm_0_d, *m_one_graph_const_d, *one_graph_const_d;
@@ -85,7 +86,7 @@ private:
     cudaGraphExec_t graphExec_5 = nullptr;
     cudaGraphExec_t graphExec_6 = nullptr;
 
-    template <bool viz = false>
+    template <bool viz = false, bool fuse = false>
     void gpu_pbicgstab_graph_1_create();
 
     template <bool viz = false>
@@ -115,7 +116,7 @@ private:
     /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
     /// matrix A
     /// \param[inout] res         summary of solver result
-    template <bool enabled, bool viz = false>
+    template <bool enabled, bool viz = false, bool fuse = false>
     void gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res);
 
     /// Initialize GPU and allocate memory
@@ -166,12 +167,14 @@ public:
     /// \param[in] deviceID                   the device to be used
     /// \param[in] graph_enabled              enabling using of CUDA Graphs
     /// \param[in] graph_viz_enabled          enabling save of CUDA Graphs visualization
+    /// \param[in] fuse_vector                replacement Dscal, Daxpy, and both Dcopy call with one call
     cusparseSolverBackend(int linear_solver_verbosity,
                           int maxit,
                           Scalar tolerance,
                           unsigned int deviceID,
                           bool graph_enabled = false,
-                          bool graph_viz_enabled = false);
+                          bool graph_viz_enabled = false,
+                          bool fuse_vector = false);
 
     /// Destroy a cusparseSolver, and free memory
     ~cusparseSolverBackend();
