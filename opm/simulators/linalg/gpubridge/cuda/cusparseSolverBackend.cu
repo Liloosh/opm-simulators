@@ -119,11 +119,13 @@ cusparseSolverBackend<Scalar, block_size>::cusparseSolverBackend(int verbosity_,
                                                                  unsigned int deviceID_,
                                                                  bool graph_enabled_,
                                                                  bool graph_viz_enabled_,
-                                                                 bool fuse_vector_)
+                                                                 bool fuse_vector_,
+                                                                 bool graph_split_)
     : Base(verbosity_, maxit_, tolerance_, deviceID_)
     , graph_enabled(graph_enabled_)
     , graph_viz_enabled(graph_viz_enabled_)
     , fuse_vector(fuse_vector_)
+    , graph_split(graph_split_)
 {
     // initialize CUDA device, stream and libraries
 
@@ -430,16 +432,26 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_3_create()
 }
 
 template <class Scalar, unsigned int block_size>
-template <bool viz>
+template <bool viz, bool split>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_4_create()
 {
     int n = N;
 
     cudaGraph_t graph;
+    cudaStream_t stream_1, stream_2;
+    cudaEvent_t fork_event, join_event_1, join_event_2;
+
+    if constexpr (split) {
+        cudaStreamCreate(&stream_1);
+        cudaStreamCreate(&stream_2);
+
+        cudaEventCreate(&fork_event);
+        cudaEventCreate(&join_event_1);
+        cudaEventCreate(&join_event_2);
+    }
 
     cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
-
     if constexpr (std::is_same_v<Scalar, float>) {
         cublasSdot(cublasHandle, n, d_rw, 1, d_v, 1, tmp1_d);
     } else {
@@ -450,16 +462,67 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_4_create()
     makeNegative<<<1, 1, 0, stream>>>(alpha_d, nalpha_d);
 
     if constexpr (std::is_same_v<Scalar, float>) {
-        cublasSaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
-        cublasSaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
-        cublasSnrm2(cublasHandle, n, d_r, 1, norm_d);
+        if constexpr (!split) {
+            cublasSaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
+            cublasSaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
+            cublasSnrm2(cublasHandle, n, d_r, 1, norm_d);
+        } else {
+            cudaEventRecord(fork_event, stream);
+            cudaStreamWaitEvent(stream_1, fork_event, 0);
+            cudaStreamWaitEvent(stream_2, fork_event, 0);
+
+            cublasSetStream(cublasHandle, stream_1);
+            cublasSaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
+            cublasSnrm2(cublasHandle, n, d_r, 1, norm_d);
+
+            cublasSetStream(cublasHandle, stream_2);
+            cublasSaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
+
+            cudaEventRecord(join_event_1, stream_1);
+            cudaEventRecord(join_event_2, stream_2);
+
+            cudaStreamWaitEvent(stream, join_event_1, 0);
+            cudaStreamWaitEvent(stream, join_event_2, 0);
+
+            cublasSetStream(cublasHandle, stream);
+        }
     } else {
-        cublasDaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
-        cublasDaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
-        cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+        if constexpr (!split) {
+            cublasDaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
+            cublasDaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
+            cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+        } else {
+            cudaEventRecord(fork_event, stream);
+            cudaStreamWaitEvent(stream_1, fork_event, 0);
+            cudaStreamWaitEvent(stream_2, fork_event, 0);
+
+            cublasSetStream(cublasHandle, stream_1);
+            cublasDaxpy(cublasHandle, n, nalpha_d, d_v, 1, d_r, 1);
+            cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+
+            cublasSetStream(cublasHandle, stream_2);
+            cublasDaxpy(cublasHandle, n, alpha_d, d_pw, 1, d_x, 1);
+
+            cudaEventRecord(join_event_1, stream_1);
+            cudaEventRecord(join_event_2, stream_2);
+
+            cudaStreamWaitEvent(stream, join_event_1, 0);
+            cudaStreamWaitEvent(stream, join_event_2, 0);
+
+            cublasSetStream(cublasHandle, stream);
+        }
     }
 
     cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (split) {
+        cudaEventDestroy(fork_event);
+        cudaEventDestroy(join_event_1);
+        cudaEventDestroy(join_event_2);
+
+        cudaStreamDestroy(stream_1);
+        cudaStreamDestroy(stream_2);
+    }
 
     if constexpr (viz) {
         cudaGraphDebugDotPrint(graph, "graph4.dot", cudaGraphDebugDotFlagsVerbose);
@@ -598,13 +661,25 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_5_create()
 }
 
 template <class Scalar, unsigned int block_size>
-template <bool viz>
+template <bool viz, bool split>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_6_create()
 {
     int n = N;
 
     cudaGraph_t graph;
+    cudaStream_t stream_1, stream_2;
+    cudaEvent_t fork_event, join_event_1, join_event_2;
+
+    if constexpr (split) {
+        cudaStreamCreate(&stream_1);
+        cudaStreamCreate(&stream_2);
+
+        cudaEventCreate(&fork_event);
+        cudaEventCreate(&join_event_1);
+        cudaEventCreate(&join_event_2);
+    }
+
 
     cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
 
@@ -620,16 +695,67 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_6_create()
     makeNegative<<<1, 1, 0, stream>>>(omega_d, nomega_d);
 
     if constexpr (std::is_same_v<Scalar, float>) {
-        cublasSaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
-        cublasSaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
-        cublasSnrm2(cublasHandle, n, d_r, 1, norm_d);
+        if constexpr (!split) {
+            cublasSaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
+            cublasSaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
+            cublasSnrm2(cublasHandle, n, d_r, 1, norm_d);
+        } else {
+            cudaEventRecord(fork_event, stream);
+            cudaStreamWaitEvent(stream_1, fork_event, 0);
+            cudaStreamWaitEvent(stream_2, fork_event, 0);
+
+            cublasSetStream(cublasHandle, stream_1);
+            cublasSaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
+            cublasSnrm2(cublasHandle, n, d_r, 1, norm_d);
+
+            cublasSetStream(cublasHandle, stream_2);
+            cublasSaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
+
+            cudaEventRecord(join_event_1, stream_1);
+            cudaEventRecord(join_event_2, stream_2);
+
+            cudaStreamWaitEvent(stream, join_event_1, 0);
+            cudaStreamWaitEvent(stream, join_event_2, 0);
+
+            cublasSetStream(cublasHandle, stream);
+        }
     } else {
-        cublasDaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
-        cublasDaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
-        cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+        if constexpr (!split) {
+            cublasDaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
+            cublasDaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
+            cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+        } else {
+            cudaEventRecord(fork_event, stream);
+            cudaStreamWaitEvent(stream_1, fork_event, 0);
+            cudaStreamWaitEvent(stream_2, fork_event, 0);
+
+            cublasSetStream(cublasHandle, stream_1);
+            cublasDaxpy(cublasHandle, n, nomega_d, d_t, 1, d_r, 1);
+            cublasDnrm2(cublasHandle, n, d_r, 1, norm_d);
+
+            cublasSetStream(cublasHandle, stream_2);
+            cublasDaxpy(cublasHandle, n, omega_d, d_s, 1, d_x, 1);
+
+            cudaEventRecord(join_event_1, stream_1);
+            cudaEventRecord(join_event_2, stream_2);
+
+            cudaStreamWaitEvent(stream, join_event_1, 0);
+            cudaStreamWaitEvent(stream, join_event_2, 0);
+
+            cublasSetStream(cublasHandle, stream);
+        }
     }
 
     cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (split) {
+        cudaEventDestroy(fork_event);
+        cudaEventDestroy(join_event_1);
+        cudaEventDestroy(join_event_2);
+
+        cudaStreamDestroy(stream_1);
+        cudaStreamDestroy(stream_2);
+    }
 
     if constexpr (viz) {
         cudaGraphDebugDotPrint(graph, "graph6.dot", cudaGraphDebugDotFlagsVerbose);
@@ -640,7 +766,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_6_create()
 }
 
 template <class Scalar, unsigned int block_size>
-template <bool enabled, bool viz, bool fuse>
+template <bool enabled, bool viz, bool fuse, bool split>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res)
 {
@@ -904,7 +1030,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_4) {
-                gpu_pbicgstab_graph_4_create<viz>();
+                gpu_pbicgstab_graph_4_create<viz, split>();
                 isCaptured_4 = true;
             }
             cudaGraphLaunch(graphExec_4, stream);
@@ -1060,7 +1186,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_6) {
-                gpu_pbicgstab_graph_6_create<viz>();
+                gpu_pbicgstab_graph_6_create<viz, split>();
                 isCaptured_6 = true;
             }
 
@@ -1605,14 +1731,22 @@ cusparseSolverBackend<Scalar, block_size>::solve_system(WellContributions<Scalar
 {
     // actually solve
     if (graph_enabled) {
-        if (graph_viz_enabled && fuse_vector) {
-            gpu_pbicgstab<true, true, true>(wellContribs, res);
-        } else if (graph_viz_enabled && !fuse_vector) {
-            gpu_pbicgstab<true, true, false>(wellContribs, res);
-        } else if (!graph_viz_enabled && fuse_vector) {
-            gpu_pbicgstab<true, false, true>(wellContribs, res);
+        if (graph_viz_enabled && fuse_vector && graph_split) {
+            gpu_pbicgstab<true, true, true, true>(wellContribs, res);
+        } else if (graph_viz_enabled && fuse_vector && !graph_split) {
+            gpu_pbicgstab<true, true, true, false>(wellContribs, res);
+        } else if (graph_viz_enabled && !fuse_vector && graph_split) {
+            gpu_pbicgstab<true, true, false, true>(wellContribs, res);
+        } else if (graph_viz_enabled && !fuse_vector && !graph_split) {
+            gpu_pbicgstab<true, true, false, false>(wellContribs, res);
+        } else if (!graph_viz_enabled && fuse_vector && graph_split) {
+            gpu_pbicgstab<true, false, true, true>(wellContribs, res);
+        } else if (!graph_viz_enabled && fuse_vector && !graph_split) {
+            gpu_pbicgstab<true, false, true, false>(wellContribs, res);
+        } else if (!graph_viz_enabled && !fuse_vector && graph_split) {
+            gpu_pbicgstab<true, false, false, true>(wellContribs, res);
         } else {
-            gpu_pbicgstab<true, false, false>(wellContribs, res);
+            gpu_pbicgstab<true, false, false, false>(wellContribs, res);
         }
     } else {
         gpu_pbicgstab<false>(wellContribs, res);

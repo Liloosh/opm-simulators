@@ -66,6 +66,7 @@ private:
     const bool graph_enabled;
     const bool graph_viz_enabled;
     const bool fuse_vector;
+    const bool graph_split;
 
     // variables needed for graph
     Scalar *norm_0_d, *m_one_graph_const_d, *one_graph_const_d;
@@ -95,13 +96,13 @@ private:
     template <bool viz = false>
     void gpu_pbicgstab_graph_3_create();
 
-    template <bool viz = false>
+    template <bool viz = false, bool split = false>
     void gpu_pbicgstab_graph_4_create();
 
     template <bool viz = false>
     void gpu_pbicgstab_graph_5_create();
 
-    template <bool viz = false>
+    template <bool viz = false, bool split = false>
     void gpu_pbicgstab_graph_6_create();
 
     bool analysis_done = false;
@@ -116,7 +117,7 @@ private:
     /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
     /// matrix A
     /// \param[inout] res         summary of solver result
-    template <bool enabled, bool viz = false, bool fuse = false>
+    template <bool enabled, bool viz = false, bool fuse = false, bool split = false>
     void gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res);
 
     /// Initialize GPU and allocate memory
@@ -174,7 +175,8 @@ public:
                           unsigned int deviceID,
                           bool graph_enabled = false,
                           bool graph_viz_enabled = false,
-                          bool fuse_vector = false);
+                          bool fuse_vector = false,
+                          bool graph_split = false);
 
     /// Destroy a cusparseSolver, and free memory
     ~cusparseSolverBackend();
