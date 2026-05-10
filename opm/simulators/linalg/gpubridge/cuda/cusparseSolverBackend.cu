@@ -92,9 +92,10 @@ makeNegative(Scalar* src, Scalar* dest)
 
 template <class Scalar, unsigned int block_size>
 cusparseSolverBackend<Scalar, block_size>::cusparseSolverBackend(
-    int verbosity_, int maxit_, Scalar tolerance_, unsigned int deviceID_, bool graph_enabled_)
+    int verbosity_, int maxit_, Scalar tolerance_, unsigned int deviceID_, bool graph_enabled_, bool graph_viz_enabled_)
     : Base(verbosity_, maxit_, tolerance_, deviceID_)
     , graph_enabled(graph_enabled_)
+    , graph_viz_enabled(graph_viz_enabled_)
 {
     // initialize CUDA device, stream and libraries
 
@@ -156,6 +157,7 @@ cusparseSolverBackend<Scalar, block_size>::~cusparseSolverBackend()
 }
 
 template <class Scalar, unsigned int block_size>
+template <bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
 {
@@ -214,11 +216,17 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
     }
 
     cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (viz) {
+        cudaGraphDebugDotPrint(graph, "graph1.dot", cudaGraphDebugDotFlagsVerbose);
+    }
+
     cudaGraphInstantiate(&graphExec_1, graph, nullptr, nullptr, 0);
     cudaGraphDestroy(graph);
 }
 
 template <class Scalar, unsigned int block_size>
+template <bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_2_create()
 {
@@ -242,11 +250,17 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_2_create()
     }
 
     cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (viz) {
+        cudaGraphDebugDotPrint(graph, "graph2.dot", cudaGraphDebugDotFlagsVerbose);
+    }
+
     cudaGraphInstantiate(&graphExec_2, graph, nullptr, nullptr, 0);
     cudaGraphDestroy(graph);
 }
 
 template <class Scalar, unsigned int block_size>
+template <bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_3_create()
 {
@@ -360,11 +374,17 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_3_create()
     }
 
     cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (viz) {
+        cudaGraphDebugDotPrint(graph, "graph3.dot", cudaGraphDebugDotFlagsVerbose);
+    }
+
     cudaGraphInstantiate(&graphExec_3, graph, nullptr, nullptr, 0);
     cudaGraphDestroy(graph);
 }
 
 template <class Scalar, unsigned int block_size>
+template <bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_4_create()
 {
@@ -394,11 +414,17 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_4_create()
     }
 
     cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (viz) {
+        cudaGraphDebugDotPrint(graph, "graph4.dot", cudaGraphDebugDotFlagsVerbose);
+    }
+
     cudaGraphInstantiate(&graphExec_4, graph, nullptr, nullptr, 0);
     cudaGraphDestroy(graph);
 }
 
 template <class Scalar, unsigned int block_size>
+template <bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_5_create()
 {
@@ -516,11 +542,17 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_5_create()
     }
 
     cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (viz) {
+        cudaGraphDebugDotPrint(graph, "graph5.dot", cudaGraphDebugDotFlagsVerbose);
+    }
+
     cudaGraphInstantiate(&graphExec_5, graph, nullptr, nullptr, 0);
     cudaGraphDestroy(graph);
 }
 
 template <class Scalar, unsigned int block_size>
+template <bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_6_create()
 {
@@ -552,12 +584,17 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_6_create()
     }
 
     cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (viz) {
+        cudaGraphDebugDotPrint(graph, "graph6.dot", cudaGraphDebugDotFlagsVerbose);
+    }
+
     cudaGraphInstantiate(&graphExec_6, graph, nullptr, nullptr, 0);
     cudaGraphDestroy(graph);
 }
 
 template <class Scalar, unsigned int block_size>
-template <bool enabled>
+template <bool enabled, bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res)
 {
@@ -630,7 +667,11 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
         }
     } else {
         if (!isCaptured_1) {
-            gpu_pbicgstab_graph_1_create();
+            if constexpr (viz) {
+                gpu_pbicgstab_graph_1_create<true>();
+            } else {
+                gpu_pbicgstab_graph_1_create<false>();
+            }
             isCaptured_1 = true;
         }
         cudaGraphLaunch(graphExec_1, stream);
@@ -678,7 +719,11 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
                 }
             } else {
                 if (!isCaptured_2) {
-                    gpu_pbicgstab_graph_2_create();
+                    if constexpr (viz) {
+                        gpu_pbicgstab_graph_2_create<true>();
+                    } else {
+                        gpu_pbicgstab_graph_2_create<false>();
+                    }
                     isCaptured_2 = true;
                 }
                 cudaGraphLaunch(graphExec_2, stream);
@@ -789,7 +834,11 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_3) {
-                gpu_pbicgstab_graph_3_create();
+                if constexpr (viz) {
+                    gpu_pbicgstab_graph_3_create<true>();
+                } else {
+                    gpu_pbicgstab_graph_3_create<false>();
+                }
                 isCaptured_3 = true;
             }
             cudaGraphLaunch(graphExec_3, stream);
@@ -821,7 +870,11 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_4) {
-                gpu_pbicgstab_graph_4_create();
+                if constexpr (viz) {
+                    gpu_pbicgstab_graph_4_create<true>();
+                } else {
+                    gpu_pbicgstab_graph_4_create<false>();
+                }
                 isCaptured_4 = true;
             }
             cudaGraphLaunch(graphExec_4, stream);
@@ -942,7 +995,11 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_5) {
-                gpu_pbicgstab_graph_5_create();
+                if constexpr (viz) {
+                    gpu_pbicgstab_graph_5_create<true>();
+                } else {
+                    gpu_pbicgstab_graph_5_create<false>();
+                }
                 isCaptured_5 = true;
             }
             cudaGraphLaunch(graphExec_5, stream);
@@ -977,7 +1034,11 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab(WellContributions<Scala
             }
         } else {
             if (!isCaptured_6) {
-                gpu_pbicgstab_graph_6_create();
+                if constexpr (viz) {
+                    gpu_pbicgstab_graph_6_create<true>();
+                } else {
+                    gpu_pbicgstab_graph_6_create<false>();
+                }
                 isCaptured_6 = true;
             }
 
@@ -1522,7 +1583,11 @@ cusparseSolverBackend<Scalar, block_size>::solve_system(WellContributions<Scalar
 {
     // actually solve
     if (graph_enabled) {
-        gpu_pbicgstab<true>(wellContribs, res);
+        if (graph_viz_enabled) {
+            gpu_pbicgstab<true, true>(wellContribs, res);
+        } else {
+            gpu_pbicgstab<true, false>(wellContribs, res);
+        }
     } else {
         gpu_pbicgstab<false>(wellContribs, res);
     }
