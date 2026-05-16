@@ -105,6 +105,14 @@ private:
     template <bool viz = false, bool split = false>
     void gpu_pbicgstab_graph_6_create();
 
+    template <bool viz>
+    void gpu_pbicgstab_prec_spmv_graph_create(Scalar* in_vec,
+                                              Scalar* t_vec,
+                                              Scalar* prec_out_vec,
+                                              Scalar* spmv_out_vec,
+                                              cudaGraphExec_t& target_graphExec,
+                                              const char* viz_name);
+
     bool analysis_done = false;
 
     bool useJacMatrix = false;

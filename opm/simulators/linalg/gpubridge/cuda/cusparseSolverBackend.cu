@@ -187,6 +187,136 @@ cusparseSolverBackend<Scalar, block_size>::~cusparseSolverBackend()
 }
 
 template <class Scalar, unsigned int block_size>
+template <bool viz>
+void
+cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_prec_spmv_graph_create(Scalar* in_vec,
+                                                                                Scalar* t_vec,
+                                                                                Scalar* prec_out_vec,
+                                                                                Scalar* spmv_out_vec,
+                                                                                cudaGraphExec_t& target_graphExec,
+                                                                                const char* viz_name)
+{
+    Scalar zero = 0.0;
+    Scalar one = 1.0;
+
+    cudaGraph_t graph;
+    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+    if constexpr (std::is_same_v<Scalar, float>) {
+        // apply ilu0 (Lower)
+        cusparseSbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_L,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_L,
+                              in_vec,
+                              t_vec,
+                              policy,
+                              d_buffer);
+        // apply ilu0 (Upper)
+        cusparseSbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_U,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_U,
+                              t_vec,
+                              prec_out_vec,
+                              policy,
+                              d_buffer);
+        // spmv
+        cusparseSbsrmv(cusparseHandle,
+                       order,
+                       operation,
+                       Nb,
+                       Nb,
+                       nnzb,
+                       &one,
+                       descr_M,
+                       d_bVals,
+                       d_bRows,
+                       d_bCols,
+                       block_size,
+                       prec_out_vec,
+                       &zero,
+                       spmv_out_vec);
+    } else {
+        // apply ilu0 (Lower)
+        cusparseDbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_L,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_L,
+                              in_vec,
+                              t_vec,
+                              policy,
+                              d_buffer);
+        // apply ilu0 (Upper)
+        cusparseDbsrsv2_solve(cusparseHandle,
+                              order,
+                              operation,
+                              Nb,
+                              nnzbs_prec,
+                              &one,
+                              descr_U,
+                              d_mVals,
+                              d_mRows,
+                              d_mCols,
+                              block_size,
+                              info_U,
+                              t_vec,
+                              prec_out_vec,
+                              policy,
+                              d_buffer);
+        // spmv
+        cusparseDbsrmv(cusparseHandle,
+                       order,
+                       operation,
+                       Nb,
+                       Nb,
+                       nnzb,
+                       &one,
+                       descr_M,
+                       d_bVals,
+                       d_bRows,
+                       d_bCols,
+                       block_size,
+                       prec_out_vec,
+                       &zero,
+                       spmv_out_vec);
+    }
+
+    cudaStreamEndCapture(stream, &graph);
+
+    if constexpr (viz) {
+        cudaGraphDebugDotPrint(graph, viz_name, cudaGraphDebugDotFlagsVerbose);
+    }
+
+    cudaGraphInstantiate(&target_graphExec, graph, nullptr, nullptr, 0);
+    cudaGraphDestroy(graph);
+}
+
+template <class Scalar, unsigned int block_size>
 template <bool viz, bool fuse>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
@@ -312,123 +442,7 @@ template <bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_3_create()
 {
-    Scalar zero = 0.0;
-    Scalar one = 1.0;
-
-    cudaGraph_t graph;
-
-    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
-
-    if constexpr (std::is_same_v<Scalar, float>) {
-        // apply ilu0
-        cusparseSbsrsv2_solve(cusparseHandle,
-                              order,
-                              operation,
-                              Nb,
-                              nnzbs_prec,
-                              &one,
-                              descr_L,
-                              d_mVals,
-                              d_mRows,
-                              d_mCols,
-                              block_size,
-                              info_L,
-                              d_p,
-                              d_t,
-                              policy,
-                              d_buffer);
-        cusparseSbsrsv2_solve(cusparseHandle,
-                              order,
-                              operation,
-                              Nb,
-                              nnzbs_prec,
-                              &one,
-                              descr_U,
-                              d_mVals,
-                              d_mRows,
-                              d_mCols,
-                              block_size,
-                              info_U,
-                              d_t,
-                              d_pw,
-                              policy,
-                              d_buffer);
-        // spmv
-        cusparseSbsrmv(cusparseHandle,
-                       order,
-                       operation,
-                       Nb,
-                       Nb,
-                       nnzb,
-                       &one,
-                       descr_M,
-                       d_bVals,
-                       d_bRows,
-                       d_bCols,
-                       block_size,
-                       d_pw,
-                       &zero,
-                       d_v);
-    } else {
-        // apply ilu0
-        cusparseDbsrsv2_solve(cusparseHandle,
-                              order,
-                              operation,
-                              Nb,
-                              nnzbs_prec,
-                              &one,
-                              descr_L,
-                              d_mVals,
-                              d_mRows,
-                              d_mCols,
-                              block_size,
-                              info_L,
-                              d_p,
-                              d_t,
-                              policy,
-                              d_buffer);
-        cusparseDbsrsv2_solve(cusparseHandle,
-                              order,
-                              operation,
-                              Nb,
-                              nnzbs_prec,
-                              &one,
-                              descr_U,
-                              d_mVals,
-                              d_mRows,
-                              d_mCols,
-                              block_size,
-                              info_U,
-                              d_t,
-                              d_pw,
-                              policy,
-                              d_buffer);
-        // spmv
-        cusparseDbsrmv(cusparseHandle,
-                       order,
-                       operation,
-                       Nb,
-                       Nb,
-                       nnzb,
-                       &one,
-                       descr_M,
-                       d_bVals,
-                       d_bRows,
-                       d_bCols,
-                       block_size,
-                       d_pw,
-                       &zero,
-                       d_v);
-    }
-
-    cudaStreamEndCapture(stream, &graph);
-
-    if constexpr (viz) {
-        cudaGraphDebugDotPrint(graph, "graph3.dot", cudaGraphDebugDotFlagsVerbose);
-    }
-
-    cudaGraphInstantiate(&graphExec_3, graph, nullptr, nullptr, 0);
-    cudaGraphDestroy(graph);
+    gpu_pbicgstab_prec_spmv_graph_create<viz>(d_p, d_t, d_pw, d_v, graphExec_3, "graph3.dot");
 }
 
 template <class Scalar, unsigned int block_size>
@@ -537,127 +551,7 @@ template <bool viz>
 void
 cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_5_create()
 {
-    Scalar zero = 0.0;
-    Scalar one = 1.0;
-
-    cudaGraph_t graph;
-
-    cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
-
-    if constexpr (std::is_same_v<Scalar, float>) {
-        // apply ilu0
-        cusparseSbsrsv2_solve(cusparseHandle,
-                              order,
-                              operation,
-                              Nb,
-                              nnzbs_prec,
-                              &one,
-                              descr_L,
-                              d_mVals,
-                              d_mRows,
-                              d_mCols,
-                              block_size,
-                              info_L,
-                              d_r,
-                              d_t,
-                              policy,
-                              d_buffer);
-
-        cusparseSbsrsv2_solve(cusparseHandle,
-                              order,
-                              operation,
-                              Nb,
-                              nnzbs_prec,
-                              &one,
-                              descr_U,
-                              d_mVals,
-                              d_mRows,
-                              d_mCols,
-                              block_size,
-                              info_U,
-                              d_t,
-                              d_s,
-                              policy,
-                              d_buffer);
-
-        // spmv
-        cusparseSbsrmv(cusparseHandle,
-                       order,
-                       operation,
-                       Nb,
-                       Nb,
-                       nnzb,
-                       &one,
-                       descr_M,
-                       d_bVals,
-                       d_bRows,
-                       d_bCols,
-                       block_size,
-                       d_s,
-                       &zero,
-                       d_t);
-    } else {
-        // apply ilu0
-        cusparseDbsrsv2_solve(cusparseHandle,
-                              order,
-                              operation,
-                              Nb,
-                              nnzbs_prec,
-                              &one,
-                              descr_L,
-                              d_mVals,
-                              d_mRows,
-                              d_mCols,
-                              block_size,
-                              info_L,
-                              d_r,
-                              d_t,
-                              policy,
-                              d_buffer);
-
-        cusparseDbsrsv2_solve(cusparseHandle,
-                              order,
-                              operation,
-                              Nb,
-                              nnzbs_prec,
-                              &one,
-                              descr_U,
-                              d_mVals,
-                              d_mRows,
-                              d_mCols,
-                              block_size,
-                              info_U,
-                              d_t,
-                              d_s,
-                              policy,
-                              d_buffer);
-
-        // spmv
-        cusparseDbsrmv(cusparseHandle,
-                       order,
-                       operation,
-                       Nb,
-                       Nb,
-                       nnzb,
-                       &one,
-                       descr_M,
-                       d_bVals,
-                       d_bRows,
-                       d_bCols,
-                       block_size,
-                       d_s,
-                       &zero,
-                       d_t);
-    }
-
-    cudaStreamEndCapture(stream, &graph);
-
-    if constexpr (viz) {
-        cudaGraphDebugDotPrint(graph, "graph5.dot", cudaGraphDebugDotFlagsVerbose);
-    }
-
-    cudaGraphInstantiate(&graphExec_5, graph, nullptr, nullptr, 0);
-    cudaGraphDestroy(graph);
+    gpu_pbicgstab_prec_spmv_graph_create<viz>(d_r, d_t, d_s, d_t, graphExec_5, "graph5.dot");
 }
 
 template <class Scalar, unsigned int block_size>
