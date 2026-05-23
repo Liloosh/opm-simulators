@@ -346,7 +346,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
                        &zero,
                        d_r);
 
-        if constexpr (fuse) {
+        if constexpr (!fuse) {
             cublasSscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
             cublasSaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
             cublasScopy(cublasHandle, n, d_r, 1, d_rw, 1);
@@ -377,7 +377,7 @@ cusparseSolverBackend<Scalar, block_size>::gpu_pbicgstab_graph_1_create()
                        &zero,
                        d_r);
 
-        if constexpr (fuse) {
+        if constexpr (!fuse) {
             cublasDscal(cublasHandle, n, m_one_graph_const_d, d_r, 1);
             cublasDaxpy(cublasHandle, n, one_graph_const_d, d_b, 1, d_r, 1);
             cublasDcopy(cublasHandle, n, d_r, 1, d_rw, 1);
