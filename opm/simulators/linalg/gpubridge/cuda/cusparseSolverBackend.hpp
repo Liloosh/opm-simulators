@@ -28,23 +28,24 @@
 #include <opm/simulators/linalg/gpubridge/GpuSolver.hpp>
 #include <opm/simulators/linalg/gpubridge/WellContributions.hpp>
 
-namespace Opm::Accelerator {
+namespace Opm::Accelerator
+{
 
 /// This class implements a cusparse-based ilu0-bicgstab solver on GPU
-template<class Scalar, unsigned int block_size>
-class cusparseSolverBackend : public GpuSolver<Scalar,block_size>
+template <class Scalar, unsigned int block_size>
+class cusparseSolverBackend : public GpuSolver<Scalar, block_size>
 {
-    using Base = GpuSolver<Scalar,block_size>;
+    using Base = GpuSolver<Scalar, block_size>;
 
+    using Base::deviceID;
+    using Base::initialized;
+    using Base::maxit;
     using Base::N;
     using Base::Nb;
     using Base::nnz;
     using Base::nnzb;
-    using Base::verbosity;
-    using Base::deviceID;
-    using Base::maxit;
     using Base::tolerance;
-    using Base::initialized;
+    using Base::verbosity;
 
 private:
     cublasHandle_t cublasHandle;
@@ -57,29 +58,80 @@ private:
     Scalar *d_bVals, *d_mVals;
     int *d_bCols, *d_mCols;
     int *d_bRows, *d_mRows;
-    Scalar *d_x, *d_b, *d_r, *d_rw, *d_p;     // vectors, used during linear solve
+    Scalar *d_x, *d_b, *d_r, *d_rw, *d_p; // vectors, used during linear solve
     Scalar *d_pw, *d_s, *d_t, *d_v;
-    void *d_buffer;
-    Scalar *vals_contiguous;                  // only used if COPY_ROW_BY_ROW is true in cusparseSolverBackend.cpp
+    void* d_buffer;
+    Scalar* vals_contiguous; // only used if COPY_ROW_BY_ROW is true in cusparseSolverBackend.cpp
+
+    const bool graph_enabled;
+    const bool graph_viz_enabled;
+    const bool fuse_vector;
+    const bool graph_split;
+
+    // variables needed for graph
+    Scalar *norm_0_d, *m_one_graph_const_d, *one_graph_const_d;
+    Scalar *beta_d, *rho_d, *rhop_d, *alpha_d, *omega_d, *nomega_d;
+    Scalar *tmp1_d, *tmp2_d, *nalpha_d, *norm_d;
+
+    bool isCaptured_1 = false;
+    bool isCaptured_2 = false;
+    bool isCaptured_3 = false;
+    bool isCaptured_4 = false;
+    bool isCaptured_5 = false;
+    bool isCaptured_6 = false;
+
+    cudaGraphExec_t graphExec_1 = nullptr;
+    cudaGraphExec_t graphExec_2 = nullptr;
+    cudaGraphExec_t graphExec_3 = nullptr;
+    cudaGraphExec_t graphExec_4 = nullptr;
+    cudaGraphExec_t graphExec_5 = nullptr;
+    cudaGraphExec_t graphExec_6 = nullptr;
+
+    template <bool viz = false, bool fuse = false>
+    void gpu_pbicgstab_graph_1_create();
+
+    template <bool viz = false>
+    void gpu_pbicgstab_graph_2_create();
+
+    template <bool viz = false>
+    void gpu_pbicgstab_graph_3_create();
+
+    template <bool viz = false, bool split = false>
+    void gpu_pbicgstab_graph_4_create();
+
+    template <bool viz = false>
+    void gpu_pbicgstab_graph_5_create();
+
+    template <bool viz = false, bool split = false>
+    void gpu_pbicgstab_graph_6_create();
+
+    template <bool viz>
+    void gpu_pbicgstab_prec_spmv_graph_create(Scalar* in_vec,
+                                              Scalar* t_vec,
+                                              Scalar* prec_out_vec,
+                                              Scalar* spmv_out_vec,
+                                              cudaGraphExec_t& target_graphExec,
+                                              const char* viz_name);
 
     bool analysis_done = false;
 
     bool useJacMatrix = false;
-    int nnzbs_prec;             // number of nonzero blocks in the matrix for preconditioner
-                                // could be jacMatrix or matrix
+    int nnzbs_prec; // number of nonzero blocks in the matrix for preconditioner
+                    // could be jacMatrix or matrix
 
     double c_copy = 0.0; // cummulative timer measuring the total time it takes to transfer the data to the GPU
 
     /// Solve linear system using ilu0-bicgstab
-    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to matrix A
+    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
+    /// matrix A
     /// \param[inout] res         summary of solver result
+    template <bool enabled, bool viz = false, bool fuse = false, bool split = false>
     void gpu_pbicgstab(WellContributions<Scalar>& wellContribs, GpuResult& res);
 
     /// Initialize GPU and allocate memory
     /// \param[in] matrix         matrix for spmv
     /// \param[in] jacMatrix      matrix for preconditioner
-    void initialize(std::shared_ptr<BlockedMatrix<Scalar>> matrix,
-                    std::shared_ptr<BlockedMatrix<Scalar>> jacMatrix);
+    void initialize(std::shared_ptr<BlockedMatrix<Scalar>> matrix, std::shared_ptr<BlockedMatrix<Scalar>> jacMatrix);
 
     /// Clean memory
     void finalize();
@@ -111,9 +163,10 @@ private:
     bool create_preconditioner();
 
     /// Solve linear system
-    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to matrix A
+    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
+    /// matrix A
     /// \param[inout] res         summary of solver result
-    void solve_system(WellContributions<Scalar>& wellContribs, GpuResult &res);
+    void solve_system(WellContributions<Scalar>& wellContribs, GpuResult& res);
 
 public:
     /// Construct a cusparseSolver
@@ -121,8 +174,17 @@ public:
     /// \param[in] maxit                      maximum number of iterations for cusparseSolver
     /// \param[in] tolerance                  required relative tolerance for cusparseSolver
     /// \param[in] deviceID                   the device to be used
-    cusparseSolverBackend(int linear_solver_verbosity, int maxit,
-                          Scalar tolerance, unsigned int deviceID);
+    /// \param[in] graph_enabled              enabling using of CUDA Graphs
+    /// \param[in] graph_viz_enabled          enabling save of CUDA Graphs visualization
+    /// \param[in] fuse_vector                replacement Dscal, Daxpy, and both Dcopy call with one call
+    cusparseSolverBackend(int linear_solver_verbosity,
+                          int maxit,
+                          Scalar tolerance,
+                          unsigned int deviceID,
+                          bool graph_enabled = false,
+                          bool graph_viz_enabled = false,
+                          bool fuse_vector = false,
+                          bool graph_split = false);
 
     /// Destroy a cusparseSolver, and free memory
     ~cusparseSolverBackend();
@@ -131,7 +193,8 @@ public:
     /// \param[in] matrix         matrix A
     /// \param[in] b              input vector, contains N values
     /// \param[in] jacMatrix      matrix for preconditioner
-    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to matrix A
+    /// \param[in] wellContribs   contains all WellContributions, to apply them separately, instead of adding them to
+    /// matrix A
     /// \param[inout] res         summary of solver result
     /// \return                   status code
     SolverStatus solve_system(std::shared_ptr<BlockedMatrix<Scalar>> matrix,
