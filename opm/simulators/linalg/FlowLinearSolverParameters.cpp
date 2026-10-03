@@ -48,6 +48,9 @@ void FlowLinearSolverParameters::init(bool cprRequestedInDataFile)
     cpr_reuse_setup_  = Parameters::Get<Parameters::CprReuseSetup>();
     cpr_reuse_interval_  = Parameters::Get<Parameters::CprReuseInterval>();
     gpu_aware_mpi_ = Parameters::Get<Parameters::GpuAwareMpi>();
+    dump_jacobian_and_rhs_ = Parameters::Get<Parameters::DumpJacobianAndRhs>();
+    filename_jacobian_ = Parameters::Get<Parameters::FilenameJacobian>();
+    filename_rhs_ = Parameters::Get<Parameters::FilenameRhs>();
 
     if (!Parameters::IsSet<Parameters::LinearSolver>() && cprRequestedInDataFile) {
         linsolver_ = "cpr";
@@ -184,6 +187,12 @@ void FlowLinearSolverParameters::registerParameters()
     Parameters::Register<Parameters::CprWeightsThreadParallel>
         ("Enable OpenMP thread parallelization of CPR weight calculation. "
             "This can improve performance for large models but is disabled by default");
+    Parameters::Register<Parameters::DumpJacobianAndRhs>
+        ("Dump the Jacobian matrix and RHS vector used for the linear solver");
+    Parameters::Register<Parameters::FilenameJacobian>
+        ("Common filename for the Jacobian matrix dump (default: filename_jacobian)");
+    Parameters::Register<Parameters::FilenameRhs>
+        ("Common filename for the RHS dump (default: filename_rhs)");
 
     Parameters::SetDefault<Parameters::LinearSolverVerbosity>(0);
 }
@@ -216,6 +225,9 @@ void FlowLinearSolverParameters::reset()
     gpu_aware_mpi_              = false;
     verify_gpu_aware_mpi_       = false;
     cpr_weights_thread_parallel_ = false;
+    dump_jacobian_and_rhs_      = false;
+    filename_jacobian_          = "filename_jacobian";
+    filename_rhs_               = "filename_rhs";
 }
 
 } // namespace Opm

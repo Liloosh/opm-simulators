@@ -419,6 +419,25 @@ std::unique_ptr<Matrix> blockJacobiAdjacency(const Grid& grid,
                                     comm_.get());
             }
 
+            if (parameters_[activeSolverNum_].dump_jacobian_and_rhs_) {
+                static int dump_counter = 0;
+                std::string suffix = "_" + std::to_string(dump_counter++);
+                std::string filename_jacobian = parameters_[activeSolverNum_].filename_jacobian_ + suffix;
+                std::string filename_rhs = parameters_[activeSolverNum_].filename_rhs_ + suffix;
+
+#if HAVE_MPI
+                if (comm_) {
+                    Dune::storeMatrixMarket(getMatrix(), filename_jacobian, *comm_);
+                    Dune::storeMatrixMarket(*rhs_, filename_rhs, *comm_);
+                }
+                else
+#endif // HAVE_MPI
+                {
+                    Dune::storeMatrixMarket(getMatrix(), filename_jacobian + ".mm");
+                    Dune::storeMatrixMarket(*rhs_, filename_rhs + ".mm");
+                }
+            }
+
             // Solve system.
             Dune::InverseOperatorResult result;
             {
