@@ -36,6 +36,7 @@
 
 namespace Dune {
     bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
 }
 
 namespace Opm
@@ -131,7 +132,7 @@ public:
     bool solve(Vector& x) override
     {
         if (Dune::enableBiCGStabCallStackLog()) {
-            std::cout << "[Execution Flow CallStack] Opm::ISTLSolverRuntimeOptionProxy::solve() - ISTLSolverRuntimeOptionProxy.hpp" << std::endl;
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::ISTLSolverRuntimeOptionProxy::solve() - ISTLSolverRuntimeOptionProxy.hpp" << std::endl;
         }
         return istlSolver_->solve(x);
     }

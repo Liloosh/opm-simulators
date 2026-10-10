@@ -61,6 +61,7 @@
 
 namespace Dune {
     bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
 }
 #include <stdexcept>
 #include <string>
@@ -138,7 +139,7 @@ public:
     int runDynamic()
     {
         if (Dune::enableBiCGStabCallStackLog()) {
-            std::cout << "[Execution Flow CallStack] Opm::Main::runDynamic() - Main.hpp" << std::endl;
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::Main::runDynamic() - Main.hpp" << std::endl;
         }
         int exitCode = EXIT_SUCCESS;
         if (initialize_<Properties::TTag::FlowEarlyBird>(exitCode)) {

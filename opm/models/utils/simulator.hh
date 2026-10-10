@@ -61,6 +61,7 @@
 
 namespace Dune {
     bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
 }
 
 namespace Opm {
@@ -596,7 +597,7 @@ public:
     void run()
     {
         if (Dune::enableBiCGStabCallStackLog()) {
-            std::cout << "[Execution Flow CallStack] Opm::Simulator::run() - simulator.hh" << std::endl;
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::Simulator::run() - simulator.hh" << std::endl;
         }
         // create TimerGuard objects to hedge for exceptions
         TimerGuard setupTimerGuard(setupTimer_);

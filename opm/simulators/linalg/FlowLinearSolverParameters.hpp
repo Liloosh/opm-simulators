@@ -93,6 +93,7 @@ struct DumpJacobianAndRhs { static constexpr bool value = false; };
 struct FilenameJacobian { static constexpr auto value = "filename_jacobian"; };
 struct FilenameRhs { static constexpr auto value = "filename_rhs"; };
 struct EnableSolverCallstackLog { static constexpr bool value = false; };
+struct SolverCallstackLogFile { static constexpr auto value = ""; };
 } // namespace Opm::Parameters
 
 namespace Opm {
@@ -130,6 +131,7 @@ struct FlowLinearSolverParameters
     std::string filename_jacobian_;
     std::string filename_rhs_;
     bool enable_solver_callstack_log_;
+    std::string solver_callstack_log_file_;
 
     FlowLinearSolverParameters() { reset(); }
 

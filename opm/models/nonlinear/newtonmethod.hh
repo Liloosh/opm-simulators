@@ -59,6 +59,7 @@
 
 namespace Dune {
     bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
 }
 
 namespace Opm {
@@ -205,7 +206,7 @@ public:
     bool apply()
     {
         if (Dune::enableBiCGStabCallStackLog()) {
-            std::cout << "[Execution Flow CallStack] Opm::NewtonMethod::apply() - newtonmethod.hh" << std::endl;
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::NewtonMethod::apply() - newtonmethod.hh" << std::endl;
         }
         const bool istty = isatty(fileno(stdout));
 

@@ -36,13 +36,14 @@
 
 namespace Dune {
     bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
 }
 
 #ifndef OPM_LOG_CALLSTACK_ILU0
 #define OPM_LOG_CALLSTACK_ILU0(msg) \
   do { \
       if (::Dune::enableBiCGStabCallStackLog()) { \
-          std::cout << "[ILU0 CallStack] " << __PRETTY_FUNCTION__ << " - " << msg << std::endl; \
+          *(::Dune::getCallStackLogStream()) << "[ILU0 CallStack] " << __PRETTY_FUNCTION__ << " - " << msg << std::endl; \
       } \
   } while(0)
 #endif

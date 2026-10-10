@@ -61,12 +61,13 @@ flowBlackoilTpfaMainInit(int argc, char** argv, bool outputCout, bool outputFile
 // ----------------- Main program -----------------
 namespace Dune {
     bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
 }
 
 int flowBlackoilTpfaMain(int argc, char** argv, bool outputCout, bool outputFiles)
 {
     if (Dune::enableBiCGStabCallStackLog()) {
-        std::cout << "[Execution Flow CallStack] Opm::flowBlackoilTpfaMain() - flow_blackoil.cpp" << std::endl;
+        *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::flowBlackoilTpfaMain() - flow_blackoil.cpp" << std::endl;
     }
     // we always want to use the default locale, and thus spare us the trouble
     // with incorrect locale settings.

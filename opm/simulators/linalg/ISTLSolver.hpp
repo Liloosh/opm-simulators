@@ -56,6 +56,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
@@ -64,6 +65,7 @@
 
 namespace Dune {
     bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
 }
 
 namespace Opm::Properties {
@@ -451,9 +453,12 @@ std::unique_ptr<Matrix> blockJacobiAdjacency(const Grid& grid,
                 
                 // Toggle the callstack logging for BiCGStab based on the solver parameters.
                 Dune::enableBiCGStabCallStackLog() = parameters_[activeSolverNum_].enable_solver_callstack_log_;
+                if (!parameters_[activeSolverNum_].solver_callstack_log_file_.empty()) {
+                    Dune::getCallStackLogStream() = std::make_shared<std::ofstream>(parameters_[activeSolverNum_].solver_callstack_log_file_, std::ios_base::out | std::ios_base::app);
+                }
                 
                 if (Dune::enableBiCGStabCallStackLog()) {
-                    std::cout << "[Execution Flow CallStack] Opm::ISTLSolver::solve() - ISTLSolver.hpp" << std::endl;
+                    *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::ISTLSolver::solve() - ISTLSolver.hpp" << std::endl;
                 }
 
                 flexibleSolver_[activeSolverNum_].solver_->apply(x, *rhs_, result);

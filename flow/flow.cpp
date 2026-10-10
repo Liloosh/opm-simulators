@@ -24,9 +24,11 @@
 #include <opm/simulators/flow/Main.hpp>
 #include <string_view>
 #include <iostream>
+#include <fstream>
 
 namespace Dune {
     bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
 }
 
 int main(int argc, char** argv)
@@ -38,11 +40,17 @@ int main(int argc, char** argv)
             arg == "--enable-solver-callstack-log=true" ||
             arg == "enable-solver-callstack-log=true") {
             Dune::enableBiCGStabCallStackLog() = true;
+        } else if (arg.starts_with("--solver-callstack-log-file=")) {
+            std::string filename = std::string(arg.substr(28));
+            Dune::getCallStackLogStream() = std::make_shared<std::ofstream>(filename, std::ios_base::out | std::ios_base::app);
+        } else if (arg.starts_with("solver-callstack-log-file=")) {
+            std::string filename = std::string(arg.substr(26));
+            Dune::getCallStackLogStream() = std::make_shared<std::ofstream>(filename, std::ios_base::out | std::ios_base::app);
         }
     }
 
     if (Dune::enableBiCGStabCallStackLog()) {
-        std::cout << "[Execution Flow CallStack] int main(int argc, char** argv) - flow/flow.cpp" << std::endl;
+        *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] int main(int argc, char** argv) - flow/flow.cpp" << std::endl;
     }
 
     auto mainObject = std::make_unique<Opm::Main>(argc, argv);
