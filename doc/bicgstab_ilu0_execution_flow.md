@@ -17,81 +17,46 @@ The execution of a simulation in OPM Flow follows a top-down approach, starting 
    - The Jacobian matrix (`J`) and the residual vector (`r`) are computed.
    - The method requests a solution to the linearized system `J * x = r` by calling the `solve()` method on its `LinearSolverBackend`.
 
-### Exact Call Stack: Solver Creation (Initialization)
-When the linear solver is invoked for the first time (or if the matrix structure changes), the internal solver objects must be instantiated:
-1. `Opm::ISTLSolver::solve(x)` is called. Before solving, it ensures the solver is set up.
-2. It delegates setup to `Opm::detail::FlexibleSolverInfo::create(...)`.
-3. `create(...)` constructs a `Dune::FlexibleSolver`, which acts as a bridge to DUNE ISTL.
-4. The `Dune::FlexibleSolver` constructor calls its internal `initSolver(...)`.
-5. `initSolver(...)` reads the `preconditioner` property (e.g., `"ilu0"`) and calls `Opm::PreconditionerFactory::create(...)`.
-6. The factory instantiates the requested preconditioner, `Opm::ParallelOverlappingILU0`.
-7. `initSolver(...)` then reads the `solver` property (e.g., `"bicgstab"`) and instantiates `Dune::BiCGSTABSolver`, passing it the newly created ILU0 preconditioner.
-
-### Exact Call Stack: Execution (Solving)
-Once the solver is instantiated, the iterative solve process happens in this stack:
-1. `Opm::NewtonMethod::solve(solutionUpdate)`
-2. `Opm::ISTLSolverRuntimeOptionProxy::solve(x)` (The backend wrapper)
-3. `Opm::ISTLSolver::solve(x)`
-4. `Dune::FlexibleSolver::apply(x, rhs, result)`
-5. `Dune::BiCGSTABSolver::apply(x, rhs, result)`
-6. Inside `BiCGSTABSolver::apply(...)`, it iterates to reduce the residual. During these iterations, it repeatedly calls the preconditioner's `apply()` method:
-7. `Opm::ParallelOverlappingILU0::apply(...)` (Applies the ILU0 preconditioning steps to the vector).
+### Linear Solver Setup and Execution
+6. **Linear Solver Backend (`Opm::ISTLSolverRuntimeOptionProxy` / `Opm::ISTLSolver`)**: The `LinearSolverBackend` property resolves to `ISTLSolverRuntimeOptionProxy`. This proxy reads runtime parameters (such as `--linear-solver=ilu0` or `--solver=bicgstab --preconditioner.type=ilu0`) and initializes the actual `Opm::ISTLSolver`.
+7. **Flexible Solver Construction (`Dune::FlexibleSolver`)**: `ISTLSolver` instantiates a `Dune::FlexibleSolver` which acts as a bridge to DUNE's Iterative Solver Template Library (ISTL).
+8. **Solver and Preconditioner Instantiation**:
+   - **Solver**: Based on the string `"bicgstab"`, `FlexibleSolver` creates a `Dune::BiCGSTABSolver<VectorType>`.
+   - **Preconditioner**: `FlexibleSolver` uses `Opm::PreconditionerFactory` to instantiate the preconditioner. Based on the string `"ilu0"`, it creates an `Opm::ParallelOverlappingILU0` (for MPI parallel runs) or an equivalent sequential/GPU ILU0 preconditioner depending on the hardware backend.
+9. **Solving the System**: The `FlexibleSolver` executes the `BiCGSTABSolver`, which iteratively approximates the solution vector `x` while applying the `ILU0` preconditioner to accelerate convergence. Once solved, the Newton method updates the state variables and checks for non-linear convergence.
 
 ---
 
-## 2. Diagram: Exact Call Stacks (Creation and Execution)
+## 2. Diagram: Execution Flow and Component Relationships
 
 ```mermaid
-sequenceDiagram
-    participant NM as NewtonMethod
-    participant Proxy as ISTLSolverRuntimeOptionProxy
-    participant ISTL as ISTLSolver
-    participant FS as Dune::FlexibleSolver
-    participant Factory as PreconditionerFactory
-    participant BC as Dune::BiCGSTABSolver
-    participant ILU as ParallelOverlappingILU0
+flowchart TD
+    %% Program Entry
+    A["main() <br> <i>flow/flow.cpp</i>"] --> B["Opm::Main::runDynamic <br> <i>opm/simulators/flow/Main.hpp</i>"]
+    B --> C["Opm::Main::dispatchDynamic_ <br> <i>MainDispatchDynamic.cpp</i>"]
 
-    %% Solver Creation Phase
-    rect rgb(240, 248, 255)
-    Note over NM, ILU: 1. Initialization / Creation Stack
-    NM->>Proxy: solve(solutionUpdate)
-    Proxy->>ISTL: solve(x)
-    ISTL->>FS: <<create>> FlexibleSolver(...)
-    activate FS
-    FS->>FS: initSolver()
-    FS->>Factory: create("ilu0")
-    activate Factory
-    Factory-->>ILU: <<create>>
-    Factory-->>FS: returns ILU0 Preconditioner
-    deactivate Factory
-    FS->>BC: <<create>> BiCGSTABSolver(..., preconditioner)
-    FS-->>ISTL: returns
-    deactivate FS
-    end
+    %% Model Dispatch
+    C -->|e.g., Black-oil| D["Opm::Main::runBlackOil"]
+    D --> E["flowBlackoilTpfaMain"]
+    E --> F["Opm::FlowMain<TypeTag>::execute <br> <i>FlowMain.hpp</i>"]
 
-    %% Solver Execution Phase
-    rect rgb(250, 250, 240)
-    Note over NM, ILU: 2. Execution / Solving Stack
-    ISTL->>FS: apply(x, rhs, result)
-    activate FS
-    FS->>BC: apply(x, rhs, result)
-    activate BC
-    
-    loop BiCGStab Iterations
-        BC->>ILU: pre()
-        BC->>ILU: apply(v, d)
-        Note right of ILU: ILU0 preconditioner applied<br>to current search direction
-        ILU-->>BC: returns smoothed vector
-        BC->>ILU: post()
-    end
-    
-    BC-->>FS: returns InverseOperatorResult
-    deactivate BC
-    FS-->>ISTL: returns
-    deactivate FS
-    ISTL-->>Proxy: returns success
-    Proxy-->>NM: returns convergence status
-    end
+    %% Simulation Loop
+    F --> G["Opm::Simulator::run <br> <i>simulator.hh</i>"]
+    G -->|Time step loop| H["Opm::NewtonMethod::solve <br> <i>newtonmethod.hh</i>"]
+
+    %% Non-Linear to Linear Transition
+    H -->|Build J, r| I["LinearSolverBackend::solve <br> <i>ISTLSolverRuntimeOptionProxy</i>"]
+
+    %% Linear Solver Subsystem
+    I --> J["Opm::ISTLSolver::apply <br> <i>ISTLSolver.cpp</i>"]
+    J --> K["Dune::FlexibleSolver <br> <i>FlexibleSolver_impl.hpp</i>"]
+
+    %% DUNE ISTL Components
+    K -->|solver='bicgstab'| L["Dune::BiCGSTABSolver"]
+    K -->|precond='ilu0'| M["Opm::PreconditionerFactory"]
+    M --> N["Opm::ParallelOverlappingILU0"]
+
+    L -.->|Applies Preconditioner| N
 ```
 
 ---
@@ -183,4 +148,29 @@ classDiagram
     FlexibleSolver --> PreconditionerFactory : uses to create
     PreconditionerFactory --> ParallelOverlappingILU0 : creates (if 'ilu0')
     BiCGSTABSolver --> Preconditioner : applies
+```
+
+## 4. Logged Call Stack Diagram (from `my_callstack.log`)
+
+The following flowchart diagram represents the exact call stack traced from the `my_callstack.log` file, showing the flow from `main` all the way down to the ILU0 preconditioner within the BiCGStab solver.
+
+```mermaid
+flowchart TD
+    A[int main <br> <i>flow/flow.cpp</i>] --> B[Opm::Main::runDynamic <br> <i>Main.hpp</i>]
+    B --> C[Opm::Main::dispatchDynamic_ <br> <i>MainDispatchDynamic.cpp</i>]
+    C --> D[Opm::Main::runBlackOil <br> <i>MainDispatchDynamic.cpp</i>]
+    D --> E[Opm::FlowMain::execute <br> <i>FlowMain.hpp</i>]
+
+    %% Intermediate simulators and Newton loops are implied here but weren't logged directly
+    E -.-> F[Opm::ISTLSolverRuntimeOptionProxy::solve <br> <i>ISTLSolverRuntimeOptionProxy.hpp</i>]
+
+    F --> G[Opm::ISTLSolver::solve <br> <i>ISTLSolver.hpp</i>]
+    G --> H[Dune::FlexibleSolver::apply <br> <i>FlexibleSolver_impl.hpp</i>]
+    H --> I[Dune::BiCGSTABSolver::apply <br> <i>Entering BiCGSTABSolver::apply</i>]
+
+    subgraph Solver Iterations
+        direction TB
+        I -->|Applying preconditioner y = W^-1 * r| J[Opm::ParallelOverlappingILU0::apply <br> <i>Entering ParallelOverlappingILU0::apply</i>]
+        I -->|Applying preconditioner y = W^-1 * p| J
+    end
 ```
