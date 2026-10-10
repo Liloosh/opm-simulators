@@ -171,6 +171,9 @@ namespace Opm {
         /// input.
         int execute()
         {
+            if (Dune::enableBiCGStabCallStackLog()) {
+                std::cout << "[Execution Flow CallStack] Opm::FlowMain::execute() - FlowMain.hpp" << std::endl;
+            }
             return execute_(&FlowMain::runSimulator, /*cleanup=*/true);
         }
 

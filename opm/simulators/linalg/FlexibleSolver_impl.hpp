@@ -84,6 +84,9 @@ namespace Dune
     FlexibleSolver<Operator>::
     apply(VectorType& x, VectorType& rhs, Dune::InverseOperatorResult& res)
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            std::cout << "[Execution Flow CallStack] Dune::FlexibleSolver::apply() - FlexibleSolver_impl.hpp" << std::endl;
+        }
         if (direct_solver_) {
             recreateDirectSolver();
         }
@@ -95,6 +98,9 @@ namespace Dune
     FlexibleSolver<Operator>::
     apply(VectorType& x, VectorType& rhs, double reduction, Dune::InverseOperatorResult& res)
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            std::cout << "[Execution Flow CallStack] Dune::FlexibleSolver::apply() - FlexibleSolver_impl.hpp" << std::endl;
+        }
         if (direct_solver_) {
             recreateDirectSolver();
         }

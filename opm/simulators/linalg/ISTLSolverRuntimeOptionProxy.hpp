@@ -32,6 +32,11 @@
 #endif
 
 #include <fmt/format.h>
+#include <iostream>
+
+namespace Dune {
+    bool& enableBiCGStabCallStackLog();
+}
 
 namespace Opm
 {
@@ -125,6 +130,9 @@ public:
 
     bool solve(Vector& x) override
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            std::cout << "[Execution Flow CallStack] Opm::ISTLSolverRuntimeOptionProxy::solve() - ISTLSolverRuntimeOptionProxy.hpp" << std::endl;
+        }
         return istlSolver_->solve(x);
     }
 

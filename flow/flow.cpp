@@ -22,9 +22,29 @@
 #include "config.h"
 
 #include <opm/simulators/flow/Main.hpp>
+#include <string_view>
+#include <iostream>
+
+namespace Dune {
+    bool& enableBiCGStabCallStackLog();
+}
 
 int main(int argc, char** argv)
 {
+    // Early scan for the logging flag
+    for (int i = 1; i < argc; ++i) {
+        std::string_view arg(argv[i]);
+        if (arg == "--enable-solver-callstack-log" ||
+            arg == "--enable-solver-callstack-log=true" ||
+            arg == "enable-solver-callstack-log=true") {
+            Dune::enableBiCGStabCallStackLog() = true;
+        }
+    }
+
+    if (Dune::enableBiCGStabCallStackLog()) {
+        std::cout << "[Execution Flow CallStack] int main(int argc, char** argv) - flow/flow.cpp" << std::endl;
+    }
+
     auto mainObject = std::make_unique<Opm::Main>(argc, argv);
     auto ret = mainObject->runDynamic();
     // Destruct mainObject as the destructor calls MPI_Finalize!

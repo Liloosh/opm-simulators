@@ -70,6 +70,9 @@
 
 int Opm::Main::dispatchDynamic_()
 {
+    if (Dune::enableBiCGStabCallStackLog()) {
+        std::cout << "[Execution Flow CallStack] Opm::Main::dispatchDynamic_() - MainDispatchDynamic.cpp" << std::endl;
+    }
     const auto& rspec = this->eclipseState_->runspec();
     const auto& phases = rspec.phases();
 
@@ -445,6 +448,9 @@ int Opm::Main::runThermal(const Phases& phases)
 
 int Opm::Main::runBlackOil()
 {
+    if (Dune::enableBiCGStabCallStackLog()) {
+        std::cout << "[Execution Flow CallStack] Opm::Main::runBlackOil() - MainDispatchDynamic.cpp" << std::endl;
+    }
     if (this->eclipseState_->getSimulationConfig().isDiffusive()) {
         // Use the traditional linearizer, as the TpfaLinearizer does not
         // support the diffusion module yet.

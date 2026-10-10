@@ -58,6 +58,10 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+
+namespace Dune {
+    bool& enableBiCGStabCallStackLog();
+}
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -133,6 +137,9 @@ public:
     /// \return Simulation's status/exit code.
     int runDynamic()
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            std::cout << "[Execution Flow CallStack] Opm::Main::runDynamic() - Main.hpp" << std::endl;
+        }
         int exitCode = EXIT_SUCCESS;
         if (initialize_<Properties::TTag::FlowEarlyBird>(exitCode)) {
             Parameters::reset();

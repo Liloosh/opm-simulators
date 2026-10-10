@@ -59,6 +59,10 @@
 #include <string>
 #include <vector>
 
+namespace Dune {
+    bool& enableBiCGStabCallStackLog();
+}
+
 namespace Opm {
 
     // required as std::max is not constexpr for float128 / quads.
@@ -591,6 +595,9 @@ public:
      */
     void run()
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            std::cout << "[Execution Flow CallStack] Opm::Simulator::run() - simulator.hh" << std::endl;
+        }
         // create TimerGuard objects to hedge for exceptions
         TimerGuard setupTimerGuard(setupTimer_);
         TimerGuard executionTimerGuard(executionTimer_);

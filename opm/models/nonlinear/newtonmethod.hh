@@ -57,6 +57,10 @@
 
 #include <unistd.h>
 
+namespace Dune {
+    bool& enableBiCGStabCallStackLog();
+}
+
 namespace Opm {
 
 // forward declaration of classes
@@ -200,6 +204,9 @@ public:
      */
     bool apply()
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            std::cout << "[Execution Flow CallStack] Opm::NewtonMethod::apply() - newtonmethod.hh" << std::endl;
+        }
         const bool istty = isatty(fileno(stdout));
 
         // Clear the current line using an ansi escape

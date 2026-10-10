@@ -452,6 +452,10 @@ std::unique_ptr<Matrix> blockJacobiAdjacency(const Grid& grid,
                 // Toggle the callstack logging for BiCGStab based on the solver parameters.
                 Dune::enableBiCGStabCallStackLog() = parameters_[activeSolverNum_].enable_solver_callstack_log_;
                 
+                if (Dune::enableBiCGStabCallStackLog()) {
+                    std::cout << "[Execution Flow CallStack] Opm::ISTLSolver::solve() - ISTLSolver.hpp" << std::endl;
+                }
+
                 flexibleSolver_[activeSolverNum_].solver_->apply(x, *rhs_, result);
             }
 
