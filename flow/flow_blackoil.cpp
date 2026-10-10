@@ -45,6 +45,11 @@ namespace Opm {
 }
 
 
+namespace Dune {
+    bool& enableBiCGStabCallStackLog();
+    std::shared_ptr<std::ostream>& getCallStackLogStream();
+}
+
 namespace Opm
 {
 std::unique_ptr<FlowMain<Properties::TTag::FlowProblemTPFA>>
@@ -59,11 +64,6 @@ flowBlackoilTpfaMainInit(int argc, char** argv, bool outputCout, bool outputFile
 }
 
 // ----------------- Main program -----------------
-namespace Dune {
-    bool& enableBiCGStabCallStackLog();
-    std::shared_ptr<std::ostream>& getCallStackLogStream();
-}
-
 int flowBlackoilTpfaMain(int argc, char** argv, bool outputCout, bool outputFiles)
 {
     if (Dune::enableBiCGStabCallStackLog()) {
