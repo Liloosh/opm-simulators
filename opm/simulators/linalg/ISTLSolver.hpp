@@ -62,7 +62,12 @@
 #include <tuple>
 #include <vector>
 
+namespace Dune {
+    bool& enableBiCGStabCallStackLog();
+}
+
 namespace Opm::Properties {
+
 
 namespace TTag {
 struct FlowIstlSolver {
@@ -443,6 +448,10 @@ std::unique_ptr<Matrix> blockJacobiAdjacency(const Grid& grid,
             {
                 OPM_TIMEBLOCK(flexibleSolverApply);
                 assert(flexibleSolver_[activeSolverNum_].solver_);
+                
+                // Toggle the callstack logging for BiCGStab based on the solver parameters.
+                Dune::enableBiCGStabCallStackLog() = parameters_[activeSolverNum_].enable_solver_callstack_log_;
+                
                 flexibleSolver_[activeSolverNum_].solver_->apply(x, *rhs_, result);
             }
 

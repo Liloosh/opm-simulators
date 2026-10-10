@@ -32,6 +32,20 @@
 #include <opm/simulators/linalg/matrixblock.hh>
 
 #include <cassert>
+#include <iostream>
+
+namespace Dune {
+    bool& enableBiCGStabCallStackLog();
+}
+
+#ifndef OPM_LOG_CALLSTACK_ILU0
+#define OPM_LOG_CALLSTACK_ILU0(msg) \
+  do { \
+      if (::Dune::enableBiCGStabCallStackLog()) { \
+          std::cout << "[ILU0 CallStack] " << __PRETTY_FUNCTION__ << " - " << msg << std::endl; \
+      } \
+  } while(0)
+#endif
 
 namespace Opm
 {
@@ -322,6 +336,7 @@ template<class Matrix, class Domain, class Range, class ParallelInfoT>
 void ParallelOverlappingILU0<Matrix,Domain,Range,ParallelInfoT>::
 apply (Domain& v, const Range& d)
 {
+    OPM_LOG_CALLSTACK_ILU0("Entering ParallelOverlappingILU0::apply");
     OPM_TIMEBLOCK(apply);
     Range& md = reorderD(d);
     Domain& mv = reorderV(v);

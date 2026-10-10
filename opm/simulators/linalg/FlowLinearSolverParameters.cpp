@@ -51,6 +51,7 @@ void FlowLinearSolverParameters::init(bool cprRequestedInDataFile)
     dump_jacobian_and_rhs_ = Parameters::Get<Parameters::DumpJacobianAndRhs>();
     filename_jacobian_ = Parameters::Get<Parameters::FilenameJacobian>();
     filename_rhs_ = Parameters::Get<Parameters::FilenameRhs>();
+    enable_solver_callstack_log_ = Parameters::Get<Parameters::EnableSolverCallstackLog>();
 
     if (!Parameters::IsSet<Parameters::LinearSolver>() && cprRequestedInDataFile) {
         linsolver_ = "cpr";
@@ -193,6 +194,8 @@ void FlowLinearSolverParameters::registerParameters()
         ("Common filename for the Jacobian matrix dump (default: filename_jacobian)");
     Parameters::Register<Parameters::FilenameRhs>
         ("Common filename for the RHS dump (default: filename_rhs)");
+    Parameters::Register<Parameters::EnableSolverCallstackLog>
+        ("Enable logging of the call stack for the linear solver (e.g., BiCGStab with ILU0)");
 
     Parameters::SetDefault<Parameters::LinearSolverVerbosity>(0);
 }
@@ -228,6 +231,7 @@ void FlowLinearSolverParameters::reset()
     dump_jacobian_and_rhs_      = false;
     filename_jacobian_          = "filename_jacobian";
     filename_rhs_               = "filename_rhs";
+    enable_solver_callstack_log_ = false;
 }
 
 } // namespace Opm
