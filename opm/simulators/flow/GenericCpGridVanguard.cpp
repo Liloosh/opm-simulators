@@ -230,6 +230,28 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
                                  faceTrans, wells,
                                  possibleFutureConnections,
                                  eclState1, parallelWells);
+
+            // LOGGING: Print work distribution across ranks to check load balancing fairness
+            int num_owned_cells = 0;
+            for (const auto& elem : elements(this->grid_->leafGridView(), Dune::Partitions::interior)) {
+                (void)elem;
+                ++num_owned_cells;
+            }
+
+            std::vector<int> cells_per_rank(mpiSize, 0);
+            this->grid_->comm().gather(&num_owned_cells, cells_per_rank.data(), 1, 0);
+
+            if (this->grid_->comm().rank() == 0) {
+                OpmLog::info("\n=== MPI Workload Distribution ===");
+                OpmLog::info("\nNumber of owned (interior) cells per MPI Rank:");
+                int total_cells = 0;
+                for (int i = 0; i < mpiSize; ++i) {
+                    OpmLog::info(fmt::format("\n  Rank {:<3}: {:>7} cells", i, cells_per_rank[i]));
+                    total_cells += cells_per_rank[i];
+                }
+                OpmLog::info(fmt::format("\n  Total  : {:>7} cells", total_cells));
+                OpmLog::info("\n=================================\n");
+            }
         }
 
         // Add inactive wells to all ranks with connections (not solved, so OK even without distributed wells)
