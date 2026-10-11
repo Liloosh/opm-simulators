@@ -46,6 +46,8 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include <opm/simulators/utils/CallStackLog.hpp>
+
 namespace Opm {
 
 template <typename TypeTag>
@@ -83,6 +85,9 @@ public:
 
     void invalidateAndUpdateIntensiveQuantities(unsigned timeIdx) const
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::FIBlackOilModel::invalidateAndUpdateIntensiveQuantities() - FIBlackoilModel.hpp" << std::endl;
+        }
         this->invalidateIntensiveQuantitiesCache(timeIdx);
         if constexpr (gridIsUnchanging) {
             if constexpr (avoidElementContext) {
@@ -253,6 +258,9 @@ protected:
     template <class ...Args>
     void updateCachedIntQuantsLoop(const unsigned timeIdx) const
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::FIBlackOilModel::updateCachedIntQuantsLoop() - FIBlackoilModel.hpp" << std::endl;
+        }
         const auto& elementMapper = this->simulator_.model().elementMapper();
 #ifdef _OPENMP
 #pragma omp parallel for

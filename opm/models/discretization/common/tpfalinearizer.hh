@@ -77,6 +77,7 @@
 #include <opm/simulators/linalg/gpuistl/MiniVector.hpp>
 #endif
 #endif
+#include <opm/simulators/utils/CallStackLog.hpp>
 
 namespace Opm::Parameters {
 
@@ -290,6 +291,9 @@ public:
      */
     void linearize()
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::TpfaLinearizer::linearize() - tpfalinearizer.hh" << std::endl;
+        }
         linearizeDomain();
         linearizeAuxiliaryEquations();
     }
@@ -898,6 +902,9 @@ private:
     template <class SubDomainType>
     void linearize_(const SubDomainType& domain)
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::TpfaLinearizer::linearize_() - tpfalinearizer.hh" << std::endl;
+        }
         // This check should be removed once this is addressed by
         // for example storing the previous timesteps' values for
         // rsmax (for DRSDT) and similar.

@@ -1,69 +1,204 @@
-# OPM Flow Execution Flow: BiCGStab Solver with ILU0 Preconditioner
+# OPM Flow Execution Flow: BiCGStab Solver with ILU0 Preconditioner & OpenMP Parallelism
 
-This document details the execution flow and class hierarchy for the `flow` executable in the `opm-simulators` repository when running a simulation using the BiCGStab linear solver with an ILU0 preconditioner.
-
-## 1. Execution Flow Description
-
-The execution of a simulation in OPM Flow follows a top-down approach, starting from the main binary entry point, dispatching to a specific physical model, stepping through time using a non-linear Newton solver, and finally solving the resulting linear systems.
-
-### Initialization and Dispatching
-1. **Entry Point (`flow/flow.cpp`)**: The executable begins in `main()`, which instantiates `Opm::Main` and calls its `runDynamic()` method.
-2. **Model Selection (`Main::runDynamic()` & `Main::dispatchDynamic_()`)**: `Opm::Main` reads the Eclipse deck file (e.g., `.DATA` file) to initialize the simulation properties and configuration. It evaluates the physical model requirements (e.g., black-oil, water-only, thermal, micp, polymer) based on the active phases and options. It then dispatches execution to the corresponding runner, such as `runBlackOil()`.
-3. **Simulator Instantiation (`flowBlackoilTpfaMain`)**: Depending on specific mechanics like TPFA (Two-Point Flux Approximation) or TPSA, a specific execution function is called (e.g., `flowBlackoilTpfaMain`). This function creates an instance of `Opm::FlowMain<TypeTag>` (where `TypeTag` provides compile-time property bindings) and triggers `execute()`.
-
-### Simulation Loop and Non-Linear Solver
-4. **Time Stepping (`Opm::Simulator::run`)**: `FlowMain` sets up the `Opm::Simulator` and enters the main time-stepping loop. For each time step, it calls a `step()` method.
-5. **Newton Iterations (`Opm::NewtonMethod`)**: To resolve the non-linear equations for the current time step, the simulator employs a Newton-Raphson method (typically via `Opm::NewtonMethod`). In each Newton iteration:
-   - The Jacobian matrix (`J`) and the residual vector (`r`) are computed.
-   - The method requests a solution to the linearized system `J * x = r` by calling the `solve()` method on its `LinearSolverBackend`.
-
-### Linear Solver Setup and Execution
-6. **Linear Solver Backend (`Opm::ISTLSolverRuntimeOptionProxy` / `Opm::ISTLSolver`)**: The `LinearSolverBackend` property resolves to `ISTLSolverRuntimeOptionProxy`. This proxy reads runtime parameters (such as `--linear-solver=ilu0` or `--solver=bicgstab --preconditioner.type=ilu0`) and initializes the actual `Opm::ISTLSolver`.
-7. **Flexible Solver Construction (`Dune::FlexibleSolver`)**: `ISTLSolver` instantiates a `Dune::FlexibleSolver` which acts as a bridge to DUNE's Iterative Solver Template Library (ISTL).
-8. **Solver and Preconditioner Instantiation**:
-   - **Solver**: Based on the string `"bicgstab"`, `FlexibleSolver` creates a `Dune::BiCGSTABSolver<VectorType>`.
-   - **Preconditioner**: `FlexibleSolver` uses `Opm::PreconditionerFactory` to instantiate the preconditioner. Based on the string `"ilu0"`, it creates an `Opm::ParallelOverlappingILU0` (for MPI parallel runs) or an equivalent sequential/GPU ILU0 preconditioner depending on the hardware backend.
-9. **Solving the System**: The `FlexibleSolver` executes the `BiCGSTABSolver`, which iteratively approximates the solution vector `x` while applying the `ILU0` preconditioner to accelerate convergence. Once solved, the Newton method updates the state variables and checks for non-linear convergence.
+This document details the end-to-end execution flow, OpenMP parallel regions, class hierarchy, and logged callstack transitions for the `flow` executable in `opm-simulators` when running with:
+- **Linear Solver:** BiCGStab (`--linear-solver=ilu0`, `--use-gmres=false`)
+- **Preconditioner:** ILU0 (`Opm::ParallelOverlappingILU0`)
+- **Multithreading:** OpenMP (`--threads-per-process=4`)
+- **MPI Processes:** 1 (`-np 1`)
+- **Case Deck:** `SPE1CASE1.DATA`
+- **Verified Log:** `my_callstack.log` (generated with `--enable-solver-callstack-log=true`)
 
 ---
 
-## 2. Diagram: Execution Flow and Component Relationships
+## 1. Execution Flow Overview & OpenMP Concurrency Model
+
+In OPM Flow, execution coordinates a multi-level loop hierarchy:
+1. **Simulation Level:** Program initialization, reading Eclipse deck, setting up grid and static rock properties.
+2. **Time-Stepping Loop (`SimulatorFullyImplicitBlackoil::run`):** Manages discrete simulation time steps according to schedule and adaptive time-stepping heuristics.
+3. **Non-Linear Newton-Raphson Loop (`NonlinearSolver::step`):** Linearizes non-linear partial differential equations for multiphase fluid flow until convergence.
+4. **Linear Solver Loop (`BiCGSTABSolver::apply`):** Solves the sparse block linear system $J \cdot x = r$ iteratively, evaluating the ILU0 preconditioner on each iteration.
+
+### Concurrency Model: Master Thread vs. OpenMP Thread Pool
+When running with `--threads-per-process=4`:
+- **Serial / Control Flow (Thread 0 / Master):** Orchestrates simulation dispatch, time-step progression, convergence tests, and solver iteration state transitions.
+- **Fork-Join OpenMP Multithreading (Threads 0-3):** Accelerates computationally intensive data-parallel kernels over grid cells and faces via `#pragma omp parallel for` or OpenMP parallel blocks.
+
+---
+
+## 2. Executable Flow Diagram Counting OpenMP Multithreading
+
+The diagram below maps the complete execution flow, highlighting where execution is single-threaded (Master Thread) versus where it forks into 4 OpenMP worker threads.
 
 ```mermaid
 flowchart TD
-    %% Program Entry
-    A["main() <br> <i>flow/flow.cpp</i>"] --> B["Opm::Main::runDynamic <br> <i>opm/simulators/flow/Main.hpp</i>"]
-    B --> C["Opm::Main::dispatchDynamic_ <br> <i>MainDispatchDynamic.cpp</i>"]
+    classDef serial fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b;
+    classDef ompRegion fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,stroke-dasharray: 5 5,color:#1b5e20;
+    classDef ompKernel fill:#c8e6c9,stroke:#388e3c,stroke-width:2px,color:#1b5e20;
+    classDef solver fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#e65100;
 
-    %% Model Dispatch
-    C -->|e.g., Black-oil| D["Opm::Main::runBlackOil"]
-    D --> E["flowBlackoilTpfaMain"]
-    E --> F["Opm::FlowMain<TypeTag>::execute <br> <i>FlowMain.hpp</i>"]
+    %% 1. Initialization
+    subgraph INIT["1. Initialization Phase (Single-Threaded Master)"]
+        direction TB
+        A["main(argc, argv)<br><i>flow/flow.cpp</i>"]:::serial
+        B["Opm::Main::runDynamic()<br><i>Main.hpp</i>"]:::serial
+        C["Opm::Main::dispatchDynamic_()<br><i>MainDispatchDynamic.cpp</i>"]:::serial
+        D["Opm::Main::runBlackOil()<br><i>MainDispatchDynamic.cpp</i>"]:::serial
+        E["Opm::FlowMain::execute()<br><i>FlowMain.hpp</i>"]:::serial
+        A --> B --> C --> D --> E
+    end
 
-    %% Simulation Loop
-    F --> G["Opm::Simulator::run <br> <i>simulator.hh</i>"]
-    G -->|Time step loop| H["Opm::NewtonMethod::solve <br> <i>newtonmethod.hh</i>"]
+    %% OpenMP Static Grid Setup
+    subgraph OMP_INIT["OpenMP Stage 1: Static Grid & Initial Properties (4 Threads)"]
+        direction TB
+        E1["Fork OpenMP Pool<br>#pragma omp parallel for"]:::ompRegion
+        K1["Opm::Transmissibility::update()<br><i>Transmissibility_impl.hpp</i><br>• Compute face transmissibilities across all grid faces"]:::ompKernel
+        K2["Opm::FIBlackOilModel::updateCachedIntQuantsLoop()<br><i>FIBlackoilModel.hpp</i><br>• Initial cell-wise fluid states & intensive properties"]:::ompKernel
+        K3["Opm::EclWriter::writeInitialFIPReport()<br><i>EclWriter.hpp</i><br>• Compute initial fluids-in-place (FIP) over cells"]:::ompKernel
+        E1 --> K1 --> K2 --> K3
+    end
+    E --> E1
 
-    %% Non-Linear to Linear Transition
-    H -->|Build J, r| I["LinearSolverBackend::solve <br> <i>ISTLSolverRuntimeOptionProxy</i>"]
+    %% 2. Time-Stepping Loop
+    subgraph TIMESTEP["2. Simulation Time-Stepping Loop (Master Control)"]
+        direction TB
+        F["Opm::SimulatorFullyImplicitBlackoil::run()<br><i>SimulatorFullyImplicitBlackoil.hpp</i>"]:::serial
+        G["Opm::SimulatorFullyImplicitBlackoil::runStep()<br><i>SimulatorFullyImplicitBlackoil.hpp</i>"]:::serial
+        H["Opm::NonlinearSolver::step()<br><i>NonlinearSolver.hpp</i>"]:::serial
+        F --> G --> H
+    end
+    K3 --> F
 
-    %% Linear Solver Subsystem
-    I --> J["Opm::ISTLSolver::apply <br> <i>ISTLSolver.cpp</i>"]
-    J --> K["Dune::FlexibleSolver <br> <i>FlexibleSolver_impl.hpp</i>"]
+    %% 3. Non-Linear Newton Loop
+    subgraph NEWTON_LOOP["3. Newton-Raphson Non-Linear Iteration Loop"]
+        direction TB
+        subgraph OMP_THERMO["OpenMP Stage 2: Thermodynamic Property Evaluation (4 Threads)"]
+            T1["Fork OpenMP Pool<br>#pragma omp parallel for"]:::ompRegion
+            T2["Opm::FIBlackOilModel::updateCachedIntQuantsLoop()<br><i>FIBlackoilModel.hpp</i><br>• Intensive quantities for all active cells<br>• Pressures, saturations, viscosities, densities, FVF"]:::ompKernel
+            T1 --> T2
+        end
 
-    %% DUNE ISTL Components
-    K -->|solver='bicgstab'| L["Dune::BiCGSTABSolver"]
-    K -->|precond='ilu0'| M["Opm::PreconditionerFactory"]
-    M --> N["Opm::ParallelOverlappingILU0"]
+        N1["Opm::BlackoilModel::nonlinearIterationNewton()<br><i>BlackoilModel_impl.hpp</i>"]:::serial
 
-    L -.->|Applies Preconditioner| N
+        subgraph OMP_ASSEMBLY["OpenMP Stage 3: Jacobian Matrix & Residual Assembly (4 Threads)"]
+            A1["Fork OpenMP Pool<br>#pragma omp parallel"]:::ompRegion
+            A2["Opm::TpfaLinearizer::linearize_()<br><i>tpfalinearizer.hh</i><br>• Element/face TPFA residual calculation r<br>• Sparse Jacobian matrix assembly J"]:::ompKernel
+            A1 --> A2
+        end
+
+        H --> T1
+        T2 --> N1
+        N1 --> A1
+    end
+
+    %% 4. Linear Solver Phase
+    subgraph LINEAR_SOLVER["4. Linear Solver Phase: BiCGStab + ILU0 Preconditioner"]
+        direction TB
+        L1["Opm::ISTLSolverRuntimeOptionProxy::solve()<br><i>ISTLSolverRuntimeOptionProxy.hpp</i>"]:::solver
+        L2["Opm::ISTLSolver::solve()<br><i>ISTLSolver.hpp</i>"]:::solver
+        L3["Dune::FlexibleSolver::apply()<br><i>FlexibleSolver_impl.hpp</i>"]:::solver
+        L4["Dune::BiCGSTABSolver::apply()<br><i>BiCGStab Outer Loop</i>"]:::solver
+
+        L1 --> L2 --> L3 --> L4
+
+        subgraph KRYLOV_LOOP["BiCGStab Krylov Iteration Loop"]
+            direction TB
+            P1["Preconditioner Solve 1 (p-vector)<br>Dune::BiCGSTABSolver::apply"]:::solver
+            I1["Opm::ParallelOverlappingILU0::apply()<br>• Forward & backward triangular solve W * y = p"]:::solver
+            M1["SpMV Matrix-Vector Product: v = J * y<br>Vector inner products: &alpha; = (r, r&#770;) / (v, r&#770;)"]:::solver
+            P2["Preconditioner Solve 2 (r-vector)<br>Dune::BiCGSTABSolver::apply"]:::solver
+            I2["Opm::ParallelOverlappingILU0::apply()<br>• Forward & backward triangular solve W * z = s"]:::solver
+            M2["SpMV Matrix-Vector Product: t = J * z<br>Inner product &omega;, update x = x + &alpha;y + &omega;z"]:::solver
+
+            P1 --> I1 --> M1 --> P2 --> I2 --> M2
+        end
+        L4 --> P1
+    end
+    A2 --> L1
+
+    %% Post-processing & Output
+    subgraph OMP_OUTPUT["5. OpenMP Stage 4: Output Preparation (4 Threads)"]
+        direction TB
+        O1["Fork OpenMP Pool<br>#pragma omp parallel for"]:::ompRegion
+        O2["Opm::EclWriter::prepareLocalCellData()<br><i>EclWriter.hpp</i><br>• Extract cell pressure, saturation, rates for Eclipse output"]:::ompKernel
+        O1 --> O2
+    end
+
+    %% Transitions & Loops
+    M2 -->|Linear System Solved| UPD["Update Solution Variables<br>& Check Newton Convergence"]:::serial
+    UPD -->|Newton Not Converged| T1
+    UPD -->|Newton Converged| O1
+    O2 -->|Step Finished| G
+    G -->|All Time Steps Finished| DONE(["Simulation Finished Successfully"]):::serial
 ```
 
 ---
 
-## 3. Class Hierarchy
+## 3. Verified Call Sequence Traced
 
-The following represents the hierarchical relationships (inheritance and aggregation) of the classes involved in the linear solver pipeline.
+```mermaid
+flowchart TD
+    M["[Execution Flow CallStack]<br>int main() - flow/flow.cpp"] --> RD["[Execution Flow CallStack]<br>Opm::Main::runDynamic()"]
+    RD --> DD["[Execution Flow CallStack]<br>Opm::Main::dispatchDynamic_()"]
+    DD --> RB["[Execution Flow CallStack]<br>Opm::Main::runBlackOil()"]
+    RB --> FM["[Execution Flow CallStack]<br>Opm::FlowMain::execute()"]
+
+    %% Initialization Branch
+    FM --> TU["[Execution Flow CallStack]<br>Opm::Transmissibility::update()"]
+    TU --> IQ1["[Execution Flow CallStack]<br>Opm::FIBlackOilModel::invalidateAndUpdateIntensiveQuantities()"]
+    IQ1 --> IQ2["[Execution Flow CallStack]<br>Opm::FIBlackOilModel::updateCachedIntQuantsLoop()"]
+    IQ2 --> FIP["[Execution Flow CallStack]<br>Opm::EclWriter::writeInitialFIPReport()"]
+
+    %% Main Simulation Loop
+    FIP --> SR["[Execution Flow CallStack]<br>Opm::SimulatorFullyImplicitBlackoil::run()"]
+    SR --> SRS["[Execution Flow CallStack]<br>Opm::SimulatorFullyImplicitBlackoil::runStep()"]
+    SRS --> NS["[Execution Flow CallStack]<br>Opm::NonlinearSolver::step()"]
+
+    %% Newton Loop
+    subgraph NEWTON["Newton-Raphson Iteration"]
+        direction TB
+        NS --> NIQ["Opm::FIBlackOilModel::invalidateAndUpdateIntensiveQuantities()"]
+        NIQ --> NQL["Opm::FIBlackOilModel::updateCachedIntQuantsLoop()"]
+        NQL --> NWI["Opm::BlackoilModel::nonlinearIterationNewton()"]
+        NWI --> LIN["Opm::TpfaLinearizer::linearize_()"]
+    end
+
+    %% Linear Solver Transition
+    LIN --> PROXY["[Execution Flow CallStack]<br>Opm::ISTLSolverRuntimeOptionProxy::solve()"]
+    PROXY --> ISTL["[Execution Flow CallStack]<br>Opm::ISTLSolver::solve()"]
+    ISTL --> FLEX["[Execution Flow CallStack]<br>Dune::FlexibleSolver::apply()"]
+    FLEX --> BCENTER["[BiCGStab CallStack]<br>Dune::BiCGSTABSolver::apply (Enter)"]
+
+    %% BiCGStab / ILU0 Preconditioner Loop
+    subgraph SOLVER_LOOP["BiCGStab Iteration & ILU0 Preconditioner Application"]
+        direction TB
+        BCENTER --> BCP["[BiCGStab CallStack]<br>BiCGSTABSolver::apply: Applying preconditioner (y = W^-1 * p)"]
+        BCP --> ILU1["[ILU0 CallStack]<br>Opm::ParallelOverlappingILU0::apply"]
+        ILU1 --> BCR["[BiCGStab CallStack]<br>BiCGSTABSolver::apply: Applying preconditioner (y = W^-1 * r)"]
+        BCR --> ILU2["[ILU0 CallStack]<br>Opm::ParallelOverlappingILU0::apply"]
+    end
+
+    %% Convergence and Output
+    ILU2 -.->|Converged| OUT["[Execution Flow CallStack]<br>Opm::EclWriter::prepareLocalCellData()"]
+    OUT --> SRS
+```
+
+---
+
+## 4. OpenMP Multithreading Stages Breakdown
+
+The run with `--threads-per-process=4` leverages OpenMP parallel regions in five key stages of the simulation:
+
+| Stage | Class & Function | Source File | OpenMP Construct & Parallel Scope | Frequency in Log |
+| :--- | :--- | :--- | :--- | :--- |
+| **Stage 1: Grid Transmissibility** | `Opm::Transmissibility::update` | `opm/simulators/flow/Transmissibility_impl.hpp` | `#pragma omp parallel for`<br>Parallelizes loop over all interior and boundary grid faces to compute geometric and transmissibility factors. | Initial grid setup |
+| **Stage 2: Fluid State Evaluation** | `Opm::FIBlackOilModel::updateCachedIntQuantsLoop` | `opm/simulators/flow/FIBlackoilModel.hpp` | `#pragma omp parallel for`<br>Parallelizes evaluation of intensive thermodynamic state quantities (pressures, phase saturations, viscosities, densities, formation volume factors) across active reservoir cells. | 1,050 calls (every Newton step) |
+| **Stage 3: TPFA Linearization & Assembly** | `Opm::TpfaLinearizer::linearize_` | `opm/models/discretization/common/tpfalinearizer.hh` | `#pragma omp parallel`<br>Parallel element-by-element and face-by-face assembly of residual vector $r$ and sparse Jacobian matrix $J$. | 1,043 calls (every Newton step) |
+| **Stage 4: Output Preparation** | `Opm::EclWriter::prepareLocalCellData` & `writeInitialFIPReport` | `opm/simulators/flow/EclWriter.hpp` | `#pragma omp parallel for`<br>Parallelizes loop extracting local cell solutions into Eclipse restart/summary buffers. | 246 calls (reporting steps) |
+| **Stage 5: Krylov Iterative Linear Algebra** | `Dune::BiCGSTABSolver::apply` | `dune/istl/solvers.hh` & `FlexibleSolver_impl.hpp` | Parallel vector arithmetic, dot products, and triangular sweeps per domain partition. | 4,482 linear solves |
+
+---
+
+## 5. Class Hierarchy
 
 ```mermaid
 classDiagram
@@ -75,12 +210,21 @@ classDiagram
     class FlowMain~TypeTag~ {
         +execute()
     }
-    class Simulator {
+    class SimulatorFullyImplicitBlackoil {
         +run()
+        +runStep()
     }
-    class NewtonMethod {
-        -LinearSolverBackend linearSolver_
-        +solve()
+    class NonlinearSolver {
+        -step()
+    }
+    class BlackoilModel {
+        +nonlinearIterationNewton()
+    }
+    class TpfaLinearizer {
+        +linearize_()
+    }
+    class FIBlackOilModel {
+        +updateCachedIntQuantsLoop()
     }
 
     %% Linear Solver Backend Hierarchy
@@ -139,38 +283,16 @@ classDiagram
 
     %% Composition / Associations
     Main --> FlowMain : instantiates
-    FlowMain --> Simulator : executes
-    Simulator --> NewtonMethod : uses
-    NewtonMethod --> ISTLSolverRuntimeOptionProxy : backend
+    FlowMain --> SimulatorFullyImplicitBlackoil : executes
+    SimulatorFullyImplicitBlackoil --> NonlinearSolver : invokes
+    NonlinearSolver --> BlackoilModel : drives
+    BlackoilModel --> TpfaLinearizer : assembles via
+    BlackoilModel --> FIBlackOilModel : evaluates states via
+    NonlinearSolver --> ISTLSolverRuntimeOptionProxy : solves via
     ISTLSolverRuntimeOptionProxy --> ISTLSolver : delegates to
     ISTLSolver --> FlexibleSolver : uses
-    FlexibleSolver --> BiCGSTABSolver : wraps (if 'bicgstab')
-    FlexibleSolver --> PreconditionerFactory : uses to create
-    PreconditionerFactory --> ParallelOverlappingILU0 : creates (if 'ilu0')
-    BiCGSTABSolver --> Preconditioner : applies
-```
-
-## 4. Logged Call Stack Diagram (from `my_callstack.log`)
-
-The following flowchart diagram represents the exact call stack traced from the `my_callstack.log` file, showing the flow from `main` all the way down to the ILU0 preconditioner within the BiCGStab solver.
-
-```mermaid
-flowchart TD
-    A[int main <br> <i>flow/flow.cpp</i>] --> B[Opm::Main::runDynamic <br> <i>Main.hpp</i>]
-    B --> C[Opm::Main::dispatchDynamic_ <br> <i>MainDispatchDynamic.cpp</i>]
-    C --> D[Opm::Main::runBlackOil <br> <i>MainDispatchDynamic.cpp</i>]
-    D --> E[Opm::FlowMain::execute <br> <i>FlowMain.hpp</i>]
-
-    %% Intermediate simulators and Newton loops are implied here but weren't logged directly
-    E -.-> F[Opm::ISTLSolverRuntimeOptionProxy::solve <br> <i>ISTLSolverRuntimeOptionProxy.hpp</i>]
-
-    F --> G[Opm::ISTLSolver::solve <br> <i>ISTLSolver.hpp</i>]
-    G --> H[Dune::FlexibleSolver::apply <br> <i>FlexibleSolver_impl.hpp</i>]
-    H --> I[Dune::BiCGSTABSolver::apply <br> <i>Entering BiCGSTABSolver::apply</i>]
-
-    subgraph Solver Iterations
-        direction TB
-        I -->|Applying preconditioner y = W^-1 * r| J[Opm::ParallelOverlappingILU0::apply <br> <i>Entering ParallelOverlappingILU0::apply</i>]
-        I -->|Applying preconditioner y = W^-1 * p| J
-    end
+    FlexibleSolver --> BiCGSTABSolver : wraps
+    FlexibleSolver --> PreconditionerFactory : creates preconditioner
+    PreconditionerFactory --> ParallelOverlappingILU0 : creates
+    BiCGSTABSolver --> ParallelOverlappingILU0 : applies in iterations
 ```

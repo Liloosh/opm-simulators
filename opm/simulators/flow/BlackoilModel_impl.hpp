@@ -53,6 +53,8 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <opm/simulators/utils/CallStackLog.hpp>
+
 
 namespace {
     template <typename TypeTag>
@@ -280,6 +282,9 @@ BlackoilModel<TypeTag>::
 nonlinearIterationNewton(const SimulatorTimerInterface& timer,
                          NonlinearSolverType& nonlinear_solver)
 {
+    if (Dune::enableBiCGStabCallStackLog()) {
+        *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::BlackoilModel::nonlinearIterationNewton() - BlackoilModel_impl.hpp" << std::endl;
+    }
     // -----------   Set up reports and timer   -----------
     SimulatorReportSingle report;
     Dune::Timer perfTimer;

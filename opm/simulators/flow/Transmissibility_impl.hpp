@@ -61,6 +61,8 @@
 
 #include <fmt/format.h>
 
+#include <opm/simulators/utils/CallStackLog.hpp>
+
 namespace Opm {
 
 namespace details {
@@ -170,6 +172,9 @@ void Transmissibility<Grid,GridView,ElementMapper,CartesianIndexMapper,Scalar>::
 update(bool global, const TransUpdateQuantities update_quantities,
        const std::function<unsigned int(unsigned int)>& map, const bool applyNncMultregT)
 {
+    if (Dune::enableBiCGStabCallStackLog()) {
+        *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::Transmissibility::update() - Transmissibility_impl.hpp" << std::endl;
+    }
     // whether only update the permeability related transmissibility
     const bool onlyTrans = (update_quantities == TransUpdateQuantities::Trans);
     const auto& cartDims = cartMapper_.cartesianDimensions();

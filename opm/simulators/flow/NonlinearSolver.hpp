@@ -38,6 +38,7 @@
 #include <opm/simulators/timestepping/TimeStepControl.hpp>
 
 #include <memory>
+#include <opm/simulators/utils/CallStackLog.hpp>
 
 namespace Opm::Parameters {
 
@@ -128,6 +129,9 @@ struct NonlinearSolverParameters
 
         SimulatorReportSingle step(const SimulatorTimerInterface& timer, const TimeStepControlInterface *timeStepControl)
         {
+            if (Dune::enableBiCGStabCallStackLog()) {
+                *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::NonlinearSolver::step() - NonlinearSolver.hpp" << std::endl;
+            }
             SimulatorReportSingle report;
             report.global_time = timer.simulationTimeElapsed();
             report.timestep_length = timer.currentStepLength();

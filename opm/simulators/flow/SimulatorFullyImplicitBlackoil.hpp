@@ -67,6 +67,7 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <opm/simulators/utils/CallStackLog.hpp>
 
 namespace Opm::Parameters {
 
@@ -176,10 +177,16 @@ public:
 #ifdef RESERVOIR_COUPLING_ENABLED
     SimulatorReport run(SimulatorTimer& timer, int argc, char** argv)
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::SimulatorFullyImplicitBlackoil::run() - SimulatorFullyImplicitBlackoil.hpp" << std::endl;
+        }
         init(timer, argc, argv);
 #else
     SimulatorReport run(SimulatorTimer& timer)
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::SimulatorFullyImplicitBlackoil::run() - SimulatorFullyImplicitBlackoil.hpp" << std::endl;
+        }
         init(timer);
 #endif
         // Make cache up to date. No need for updating it in elementCtx.
@@ -394,6 +401,9 @@ public:
 
     bool runStep(SimulatorTimer& timer)
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::SimulatorFullyImplicitBlackoil::runStep() - SimulatorFullyImplicitBlackoil.hpp" << std::endl;
+        }
         if (schedule().exitStatus().has_value()) {
             if (terminalOutput_) {
                 OpmLog::info("Stopping simulation since EXIT was triggered by an action keyword.");

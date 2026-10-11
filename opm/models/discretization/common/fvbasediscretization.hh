@@ -77,6 +77,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <opm/simulators/utils/CallStackLog.hpp>
 
 namespace Opm {
 
@@ -723,6 +724,9 @@ public:
 
     void invalidateAndUpdateIntensiveQuantities(unsigned timeIdx) const
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::FvBaseDiscretization::invalidateAndUpdateIntensiveQuantities() - fvbasediscretization.hh" << std::endl;
+        }
         invalidateIntensiveQuantitiesCache(timeIdx);
 
         // loop over all elements...
@@ -958,6 +962,9 @@ public:
      */
     Scalar globalResidual(GlobalEqVector& dest) const
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::FvBaseDiscretization::globalResidual() - fvbasediscretization.hh" << std::endl;
+        }
         dest = 0;
 
         std::mutex mutex;

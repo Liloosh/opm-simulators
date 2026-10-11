@@ -63,6 +63,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <opm/simulators/utils/CallStackLog.hpp>
 
 namespace Opm::Parameters {
 
@@ -351,6 +352,9 @@ public:
     //! \brief Writes the initial FIP report as configured in RPTSOL.
     void writeInitialFIPReport()
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::EclWriter::writeInitialFIPReport() - EclWriter.hpp" << std::endl;
+        }
         const auto& gridView = simulator_.vanguard().gridView();
         const int num_interior = detail::
             countLocalInteriorCellsGridView(gridView);
@@ -756,6 +760,9 @@ private:
     void prepareLocalCellData(const bool isSubStep,
                               const int  reportStepNum)
     {
+        if (Dune::enableBiCGStabCallStackLog()) {
+            *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::EclWriter::prepareLocalCellData() - EclWriter.hpp" << std::endl;
+        }
         OPM_TIMEBLOCK(prepareLocalCellData);
 
         if (this->outputModule_->localDataValid()) {
