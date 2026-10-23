@@ -24,6 +24,7 @@
 
 #include <dune/istl/owneroverlapcopy.hh>
 #include <dune/istl/solver.hh>
+#include <dune/istl/linearsolverprofiler.hh>
 
 #include <opm/common/CriticalError.hpp>
 #include <opm/common/ErrorMacros.hpp>
@@ -460,6 +461,27 @@ std::unique_ptr<Matrix> blockJacobiAdjacency(const Grid& grid,
                 if (Dune::enableBiCGStabCallStackLog()) {
                     *(Dune::getCallStackLogStream()) << "[Execution Flow CallStack] Opm::ISTLSolver::solve() - ISTLSolver.hpp" << std::endl;
                 }
+
+                // Configure Linear Solver Profiler
+                auto& profiler = Dune::LinearSolverProfiler::instance();
+                profiler.enabled = parameters_[activeSolverNum_].enable_solver_profiling_;
+                profiler.output_file = parameters_[activeSolverNum_].solver_profile_file_;
+                profiler.base_output_dir = parameters_[activeSolverNum_].solver_profile_dir_;
+                profiler.print_summary = parameters_[activeSolverNum_].solver_profile_print_summary_;
+                profiler.detailed = parameters_[activeSolverNum_].solver_profile_detailed_;
+                if (comm_) {
+                    profiler.mpi_rank = comm_->communicator().rank();
+                    profiler.mpi_size = comm_->communicator().size();
+                }
+                if (profiler.enabled) {
+                    profiler.initSession(parameters_[activeSolverNum_].solver_profile_dir_);
+                }
+                const auto& matrix = getMatrix();
+                using BlockType = typename Matrix::block_type;
+                profiler.recordMatrix(static_cast<uint64_t>(matrix.N()) * static_cast<uint64_t>(BlockType::rows),
+                                      static_cast<uint64_t>(matrix.M()) * static_cast<uint64_t>(BlockType::cols),
+                                      static_cast<uint64_t>(matrix.nonzeroes()) * static_cast<uint64_t>(BlockType::rows) * static_cast<uint64_t>(BlockType::cols),
+                                      static_cast<uint64_t>(matrix.nonzeroes()));
 
                 flexibleSolver_[activeSolverNum_].solver_->apply(x, *rhs_, result);
             }

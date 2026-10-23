@@ -475,6 +475,8 @@ namespace Dune
     void AMGCPR<M,X,S,PI,A>::update()
     {
       OPM_TIMEBLOCK(update);
+      auto& profiler = Dune::LinearSolverProfiler::instance();
+      Dune::ScopedKernelTimer prof_timer(profiler.enabled, profiler.cpr_setup_time, profiler.cpr_setup_calls);
       Timer watch;
       smoothers_.reset(new Hierarchy<Smoother,A>);
       solver_.reset();
@@ -498,6 +500,8 @@ namespace Dune
                                                std::shared_ptr< PI > pinfo )
     {
       OPM_TIMEBLOCK(createHierarchies);
+      auto& profiler = Dune::LinearSolverProfiler::instance();
+      Dune::ScopedKernelTimer prof_timer(profiler.enabled, profiler.cpr_setup_time, profiler.cpr_setup_calls);
       Timer watch;
       matrices_.reset(new OperatorHierarchy(matrix, pinfo));
 

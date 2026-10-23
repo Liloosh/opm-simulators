@@ -12,6 +12,7 @@
 #include <dune/istl/paamg/amg.hh>
 #include <dune/istl/paamg/galerkin.hh>
 #include <dune/istl/solver.hh>
+#include <dune/istl/linearsolverprofiler.hh>
 
 #include <dune/common/unused.hh>
 #include <dune/common/version.hh>
@@ -507,6 +508,9 @@ public:
 
   void apply(FineDomainType& v, const FineRangeType& d)
   {
+    auto& profiler = Dune::LinearSolverProfiler::instance();
+    const bool do_profile = profiler.enabled;
+
     u_ = v;
     rhs_ = d;
     LevelContext context;
@@ -518,17 +522,31 @@ public:
     context.rhs=&rhs_;
     context.matrix=operator_;
     // Presmoothing
-    presmooth(context, preSteps_);
+    {
+      Dune::ScopedKernelTimer t(do_profile, profiler.cpr_presmooth_time, profiler.cpr_presmooth_calls);
+      presmooth(context, preSteps_);
+    }
     //Coarse grid correction
-    policy_->moveToCoarseLevel(*context.rhs);
+    {
+      Dune::ScopedKernelTimer t(do_profile, profiler.cpr_restriction_time, profiler.cpr_restriction_calls);
+      policy_->moveToCoarseLevel(*context.rhs);
+    }
     InverseOperatorResult res;
-    coarseSolver_->apply(policy_->getCoarseLevelLhs(), policy_->getCoarseLevelRhs(), res);
+    {
+      Dune::ScopedKernelTimer t(do_profile, profiler.cpr_coarse_solve_time, profiler.cpr_coarse_solve_calls);
+      coarseSolver_->apply(policy_->getCoarseLevelLhs(), policy_->getCoarseLevelRhs(), res);
+    }
     *context.lhs=0;
-    policy_->moveToFineLevel(*context.lhs);
+    {
+      Dune::ScopedKernelTimer t(do_profile, profiler.cpr_prolongation_time, profiler.cpr_prolongation_calls);
+      policy_->moveToFineLevel(*context.lhs);
+    }
     *context.update += *context.lhs;
     // Postsmoothing
-    postsmooth(context, postSteps_);
-
+    {
+      Dune::ScopedKernelTimer t(do_profile, profiler.cpr_postsmooth_time, profiler.cpr_postsmooth_calls);
+      postsmooth(context, postSteps_);
+    }
   }
 //   //! Category of the preconditioner (see SolverCategory::Category)
     virtual SolverCategory::Category category() const

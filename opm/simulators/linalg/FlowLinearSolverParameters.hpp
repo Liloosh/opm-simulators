@@ -94,6 +94,11 @@ struct FilenameJacobian { static constexpr auto value = "filename_jacobian"; };
 struct FilenameRhs { static constexpr auto value = "filename_rhs"; };
 struct EnableSolverCallstackLog { static constexpr bool value = false; };
 struct SolverCallstackLogFile { static constexpr auto value = ""; };
+struct EnableSolverProfiling { static constexpr bool value = false; };
+struct SolverProfileFile { static constexpr auto value = ""; };
+struct SolverProfileDir { static constexpr auto value = "benchmark_runs"; };
+struct SolverProfilePrintSummary { static constexpr bool value = true; };
+struct SolverProfileDetailed { static constexpr bool value = false; };
 } // namespace Opm::Parameters
 
 namespace Opm {
@@ -132,6 +137,11 @@ struct FlowLinearSolverParameters
     std::string filename_rhs_;
     bool enable_solver_callstack_log_;
     std::string solver_callstack_log_file_;
+    bool enable_solver_profiling_;
+    std::string solver_profile_file_;
+    std::string solver_profile_dir_;
+    bool solver_profile_print_summary_;
+    bool solver_profile_detailed_;
 
     FlowLinearSolverParameters() { reset(); }
 

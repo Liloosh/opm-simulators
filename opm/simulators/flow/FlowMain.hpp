@@ -44,6 +44,8 @@
 #include <omp.h>
 #endif
 
+#include <dune/istl/linearsolverprofiler.hh>
+
 #include <charconv>
 #include <cstddef>
 #include <memory>
@@ -276,6 +278,7 @@ namespace Opm {
         void executeCleanup_() {
             // clean up
             mergeParallelLogFiles();
+            Dune::LinearSolverProfiler::instance().finalize();
         }
 
     protected:

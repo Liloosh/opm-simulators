@@ -24,6 +24,7 @@
 
 #include <dune/istl/ilu.hh>
 #include <dune/istl/owneroverlapcopy.hh>
+#include <dune/istl/linearsolverprofiler.hh>
 
 #include <opm/common/ErrorMacros.hpp>
 #include <opm/common/TimingMacros.hpp>
@@ -339,8 +340,18 @@ apply (Domain& v, const Range& d)
 {
     OPM_LOG_CALLSTACK_ILU0("Entering ParallelOverlappingILU0::apply");
     OPM_TIMEBLOCK(apply);
-    Range& md = reorderD(d);
-    Domain& mv = reorderV(v);
+    auto& profiler = Dune::LinearSolverProfiler::instance();
+    const bool do_profile = profiler.enabled;
+
+    Range* pmd = nullptr;
+    Domain* pmv = nullptr;
+    {
+        Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_reorder_time, profiler.ilu0_reorder_calls);
+        pmd = &reorderD(d);
+        pmv = &reorderV(v);
+    }
+    Range& md = *pmd;
+    Domain& mv = *pmv;
 
     // iterator types
     using dblock = typename Range ::block_type;
@@ -356,42 +367,56 @@ apply (Domain& v, const Range& d)
     }
 
     // lower triangular solve
-    for (size_type i = 0; i < lowerLoopEnd; ++i)
     {
-        dblock rhs( md[ i ] );
-        const size_type rowI     = lower_.rows_[ i ];
-        const size_type rowINext = lower_.rows_[ i+1 ];
-
-        for (size_type col = rowI; col < rowINext; ++col)
+        Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_lower_solve_time, profiler.ilu0_lower_solve_calls);
+        for (size_type i = 0; i < lowerLoopEnd; ++i)
         {
-            lower_.values_[ col ].mmv( mv[ lower_.cols_[ col ] ], rhs );
-        }
+            dblock rhs( md[ i ] );
+            const size_type rowI     = lower_.rows_[ i ];
+            const size_type rowINext = lower_.rows_[ i+1 ];
 
-        mv[ i ] = rhs;  // Lii = I
+            for (size_type col = rowI; col < rowINext; ++col)
+            {
+                lower_.values_[ col ].mmv( mv[ lower_.cols_[ col ] ], rhs );
+            }
+
+            mv[ i ] = rhs;  // Lii = I
+        }
     }
 
-    for (size_type i = upperLoopStart; i < iEnd; ++i)
+    // upper triangular solve
     {
-        vblock& vBlock = mv[ lastRow - i ];
-        vblock rhs ( vBlock );
-        const size_type rowI     = upper_.rows_[ i ];
-        const size_type rowINext = upper_.rows_[ i+1 ];
-
-        for (size_type col = rowI; col < rowINext; ++col)
+        Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_upper_solve_time, profiler.ilu0_upper_solve_calls);
+        for (size_type i = upperLoopStart; i < iEnd; ++i)
         {
-            upper_.values_[ col ].mmv( mv[ upper_.cols_[ col ] ], rhs );
-        }
+            vblock& vBlock = mv[ lastRow - i ];
+            vblock rhs ( vBlock );
+            const size_type rowI     = upper_.rows_[ i ];
+            const size_type rowINext = upper_.rows_[ i+1 ];
 
-        // apply inverse and store result
-        inv_[ i ].mv( rhs, vBlock);
+            for (size_type col = rowI; col < rowINext; ++col)
+            {
+                upper_.values_[ col ].mmv( mv[ upper_.cols_[ col ] ], rhs );
+            }
+
+            // apply inverse and store result
+            inv_[ i ].mv( rhs, vBlock);
+        }
     }
 
-    copyOwnerToAll( mv );
+    {
+        Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_comm_time, profiler.ilu0_comm_calls);
+        copyOwnerToAll( mv );
+    }
 
     if( relaxation_ ) {
+        Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_relax_time, profiler.ilu0_relax_calls);
         mv *= w_;
     }
-    reorderBack(mv, v);
+    {
+        Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_reorder_time, profiler.ilu0_reorder_calls);
+        reorderBack(mv, v);
+    }
 }
 
 template<class Matrix, class Domain, class Range, class ParallelInfoT>
@@ -409,6 +434,8 @@ void ParallelOverlappingILU0<Matrix,Domain,Range,ParallelInfoT>::
 update()
 {
     OPM_TIMEBLOCK(update);
+    auto& profiler = Dune::LinearSolverProfiler::instance();
+    Dune::ScopedKernelTimer setup_timer(profiler.enabled, profiler.ilu0_setup_time, profiler.ilu0_setup_calls);
     // (For older DUNE versions the communicator might be
     // invalid if redistribution in AMG happened on the coarset level.
     // Therefore we check for nonzero size

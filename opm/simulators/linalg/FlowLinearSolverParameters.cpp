@@ -53,6 +53,11 @@ void FlowLinearSolverParameters::init(bool cprRequestedInDataFile)
     filename_rhs_ = Parameters::Get<Parameters::FilenameRhs>();
     enable_solver_callstack_log_ = Parameters::Get<Parameters::EnableSolverCallstackLog>();
     solver_callstack_log_file_ = Parameters::Get<Parameters::SolverCallstackLogFile>();
+    enable_solver_profiling_ = Parameters::Get<Parameters::EnableSolverProfiling>();
+    solver_profile_file_ = Parameters::Get<Parameters::SolverProfileFile>();
+    solver_profile_dir_ = Parameters::Get<Parameters::SolverProfileDir>();
+    solver_profile_print_summary_ = Parameters::Get<Parameters::SolverProfilePrintSummary>();
+    solver_profile_detailed_ = Parameters::Get<Parameters::SolverProfileDetailed>();
 
     if (!Parameters::IsSet<Parameters::LinearSolver>() && cprRequestedInDataFile) {
         linsolver_ = "cpr";
@@ -199,6 +204,16 @@ void FlowLinearSolverParameters::registerParameters()
         ("File to write the solver call stack log to (if enable-solver-callstack-log is true)");
     Parameters::Register<Parameters::EnableSolverCallstackLog>
         ("Enable logging of the call stack for the linear solver (e.g., BiCGStab with ILU0)");
+    Parameters::Register<Parameters::EnableSolverProfiling>
+        ("Enable in-code HPC profiling of linear solver kernels (BiCGSTAB, ILU0, CPR)");
+    Parameters::Register<Parameters::SolverProfileFile>
+        ("CSV output file path for linear solver profiling data");
+    Parameters::Register<Parameters::SolverProfileDir>
+        ("Directory to store timestamped benchmark run profiling folders (default: benchmark_runs)");
+    Parameters::Register<Parameters::SolverProfilePrintSummary>
+        ("Print summary table of linear solver profiling at simulation end (default: true)");
+    Parameters::Register<Parameters::SolverProfileDetailed>
+        ("Record detailed per-iteration solver timing history (default: false)");
 
     Parameters::SetDefault<Parameters::LinearSolverVerbosity>(0);
 }
@@ -236,6 +251,11 @@ void FlowLinearSolverParameters::reset()
     filename_rhs_               = "filename_rhs";
     enable_solver_callstack_log_ = false;
     solver_callstack_log_file_ = "";
+    enable_solver_profiling_ = false;
+    solver_profile_file_ = "";
+    solver_profile_dir_ = "benchmark_runs";
+    solver_profile_print_summary_ = true;
+    solver_profile_detailed_ = false;
 }
 
 } // namespace Opm
