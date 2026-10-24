@@ -306,6 +306,7 @@ setupCPRW(const std::string& /*conf*/, const FlowLinearSolverParameters& p)
     prm.put("preconditioner.post_smooth", 1);
     prm.put("preconditioner.finesmoother.type", "paroverilu0"s);
     prm.put("preconditioner.finesmoother.relaxation", 1.0);
+    prm.put("preconditioner.finesmoother.rcm", p.ilu_rcm_);
     prm.put("preconditioner.verbosity", 0);
     prm.put("preconditioner.coarsesolver.maxiter", 1);
     prm.put("preconditioner.coarsesolver.tol", 1e-1);
@@ -343,6 +344,7 @@ setupCPR(const std::string& conf, const FlowLinearSolverParameters& p)
         prm.put("preconditioner.finesmoother.type", "paroverilu0"s);
     }
     prm.put("preconditioner.finesmoother.relaxation", 1.0);
+    prm.put("preconditioner.finesmoother.rcm", p.ilu_rcm_);
     prm.put("preconditioner.verbosity", 0);
     prm.put("preconditioner.coarsesolver.maxiter", 1);
     prm.put("preconditioner.coarsesolver.tol", 1e-1);
@@ -405,6 +407,9 @@ setupILU([[maybe_unused]] const std::string& conf, const FlowLinearSolverParamet
     }
     prm.put("preconditioner.relaxation", p.ilu_relaxation_);
     prm.put("preconditioner.ilulevel", p.ilu_fillin_level_);
+    prm.put("preconditioner.redblack", p.ilu_redblack_);
+    prm.put("preconditioner.reorder_spheres", p.ilu_reorder_sphere_);
+    prm.put("preconditioner.rcm", p.ilu_rcm_);
     return prm;
 }
 

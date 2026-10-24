@@ -408,15 +408,16 @@ struct StandardPreconditioners
         const double w = prm.get<double>("relaxation", 1.0);
         const bool redblack = prm.get<bool>("redblack", false);
         const bool reorder_spheres = prm.get<bool>("reorder_spheres", false);
+        const bool rcm = prm.get<bool>("rcm", false);
         // Already a parallel preconditioner. Need to pass comm, but no need to wrap it in a BlockPreconditioner.
         if (ilulevel == 0) {
             const std::size_t num_interior = interiorIfGhostLast(comm);
             assert(num_interior <= op.getmat().N());
             return std::make_shared<ParallelOverlappingILU0<M, V, V, Comm>>(
-                op.getmat(), comm, w, MILU_VARIANT::ILU, num_interior, redblack, reorder_spheres);
+                op.getmat(), comm, w, MILU_VARIANT::ILU, num_interior, redblack, reorder_spheres, rcm);
         } else {
             return std::make_shared<ParallelOverlappingILU0<M, V, V, Comm>>(
-                op.getmat(), comm, ilulevel, w, MILU_VARIANT::ILU, redblack, reorder_spheres);
+                op.getmat(), comm, ilulevel, w, MILU_VARIANT::ILU, redblack, reorder_spheres, rcm);
         }
     }
 

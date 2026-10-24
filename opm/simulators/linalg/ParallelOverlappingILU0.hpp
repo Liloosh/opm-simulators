@@ -216,11 +216,13 @@ public:
                             The vertices on each layer aound it (same distance) are
                             ordered consecutivly. If false, we preserver the order of
                             the vertices with the same color.
+      \param rcm Whether to use Reverse Cuthill-McKee (RCM) ordering.
     */
     ParallelOverlappingILU0 (const Matrix& A,
                              const int n, const field_type w,
                              MILU_VARIANT milu, bool redblack = false,
-                             bool reorder_sphere = true);
+                             bool reorder_sphere = true,
+                             bool rcm = false);
 
     /*! \brief Constructor gets all parameters to operate the prec.
       \param A The matrix to operate on.
@@ -233,11 +235,13 @@ public:
                             The vertices on each layer aound it (same distance) are
                             ordered consecutivly. If false, we preserver the order of
                             the vertices with the same color.
+      \param rcm Whether to use Reverse Cuthill-McKee (RCM) ordering.
     */
     ParallelOverlappingILU0 (const Matrix& A,
                              const ParallelInfo& comm, const int n, const field_type w,
                              MILU_VARIANT milu, bool redblack = false,
-                             bool reorder_sphere = true);
+                             bool reorder_sphere = true,
+                             bool rcm = false);
 
     /*! \brief Constructor.
 
@@ -250,11 +254,13 @@ public:
                   The vertices on each layer aound it (same distance) are
                   ordered consecutivly. If false, we preserver the order of
                   the vertices with the same color.
+      \param rcm Whether to use Reverse Cuthill-McKee (RCM) ordering.
     */
     ParallelOverlappingILU0 (const Matrix& A,
                              const field_type w, MILU_VARIANT milu,
                              bool redblack = false,
-                             bool reorder_sphere = true);
+                             bool reorder_sphere = true,
+                             bool rcm = false);
 
     /*! \brief Constructor.
 
@@ -268,11 +274,13 @@ public:
                             The vertices on each layer aound it (same distance) are
                             ordered consecutivly. If false, we preserver the order of
                             the vertices with the same color.
+      \param rcm Whether to use Reverse Cuthill-McKee (RCM) ordering.
     */
     ParallelOverlappingILU0 (const Matrix& A,
                              const ParallelInfo& comm, const field_type w,
                              MILU_VARIANT milu, bool redblack = false,
-                             bool reorder_sphere = true);
+                             bool reorder_sphere = true,
+                             bool rcm = false);
 
     /*! \brief Constructor.
 
@@ -287,12 +295,14 @@ public:
                             The vertices on each layer aound it (same distance) are
                             ordered consecutivly. If false, we preserver the order of
                             the vertices with the same color.
+      \param rcm Whether to use Reverse Cuthill-McKee (RCM) ordering.
     */
     ParallelOverlappingILU0 (const Matrix& A,
                              const ParallelInfo& comm,
                              const field_type w, MILU_VARIANT milu,
                              size_type interiorSize, bool redblack = false,
-                             bool reorder_sphere = true);
+                             bool reorder_sphere = true,
+                             bool rcm = false);
 
     /*!
       \brief Prepare the preconditioner.
@@ -353,6 +363,7 @@ protected:
     MILU_VARIANT milu_;
     bool redBlack_;
     bool reorderSphere_;
+    bool rcm_;
 };
 
 } // end namespace Opm

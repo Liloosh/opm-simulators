@@ -63,8 +63,11 @@ struct StandardPreconditioners<Operator, Dune::Amg::SequentialInformation, typen
         using P = PropertyTree;
         F::addCreator("ilu0", [](const O& op, const P& prm, const std::function<V()>&, std::size_t) {
             const double w = prm.get<double>("relaxation", 1.0);
+            const bool redblack = prm.get<bool>("redblack", false);
+            const bool reorder_spheres = prm.get<bool>("reorder_spheres", false);
+            const bool rcm = prm.get<bool>("rcm", false);
             return std::make_shared<ParallelOverlappingILU0<M, V, V, C>>(
-                op.getmat(), 0, w, MILU_VARIANT::ILU);
+                op.getmat(), 0, w, MILU_VARIANT::ILU, redblack, reorder_spheres, rcm);
         });
         F::addCreator("duneilu", [](const O& op, const P& prm, const std::function<V()>&, std::size_t) {
             const double w = prm.get<double>("relaxation", 1.0);
@@ -75,14 +78,20 @@ struct StandardPreconditioners<Operator, Dune::Amg::SequentialInformation, typen
         F::addCreator("paroverilu0", [](const O& op, const P& prm, const std::function<V()>&, std::size_t) {
             const double w = prm.get<double>("relaxation", 1.0);
             const int n = prm.get<int>("ilulevel", 0);
+            const bool redblack = prm.get<bool>("redblack", false);
+            const bool reorder_spheres = prm.get<bool>("reorder_spheres", false);
+            const bool rcm = prm.get<bool>("rcm", false);
             return std::make_shared<ParallelOverlappingILU0<M, V, V, C>>(
-                op.getmat(), n, w, MILU_VARIANT::ILU);
+                op.getmat(), n, w, MILU_VARIANT::ILU, redblack, reorder_spheres, rcm);
         });
         F::addCreator("ilun", [](const O& op, const P& prm, const std::function<V()>&, std::size_t) {
             const int n = prm.get<int>("ilulevel", 0);
             const double w = prm.get<double>("relaxation", 1.0);
+            const bool redblack = prm.get<bool>("redblack", false);
+            const bool reorder_spheres = prm.get<bool>("reorder_spheres", false);
+            const bool rcm = prm.get<bool>("rcm", false);
             return std::make_shared<ParallelOverlappingILU0<M, V, V, C>>(
-                op.getmat(), n, w, MILU_VARIANT::ILU);
+                op.getmat(), n, w, MILU_VARIANT::ILU, redblack, reorder_spheres, rcm);
         });
         F::addCreator("dilu", [](const O& op, const P& prm, const std::function<V()>&, std::size_t) {
             DUNE_UNUSED_PARAMETER(prm);

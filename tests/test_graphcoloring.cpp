@@ -89,6 +89,120 @@ BOOST_AUTO_TEST_CASE(TestWelschPowell)
     checkAllIndices(newOrder);
 }
 
+template <class Matrix>
+std::size_t computeBandwidth(const Matrix& matrix, const std::vector<std::size_t>& ordering)
+{
+    std::size_t maxBandwidth = 0;
+    for (auto row = matrix.begin(); row != matrix.end(); ++row) {
+        std::size_t u = ordering[row.index()];
+        for (auto col = row->begin(); col != row->end(); ++col) {
+            std::size_t v = ordering[col.index()];
+            std::size_t diff = (u > v) ? (u - v) : (v - u);
+            maxBandwidth = std::max(maxBandwidth, diff);
+        }
+    }
+    return maxBandwidth;
+}
+
+BOOST_AUTO_TEST_CASE(TestReverseCuthillMcKeeScrambledLine)
+{
+    using Matrix = Dune::BCRSMatrix<Dune::FieldMatrix<double,1,1>>;
+    using Graph = Dune::Amg::MatrixGraph<Matrix>;
+
+    // 1D line graph with 10 nodes, intentionally scrambled:
+    // Path: 0 - 5 - 2 - 8 - 1 - 7 - 3 - 9 - 4 - 6
+    std::vector<std::size_t> path = {0, 5, 2, 8, 1, 7, 3, 9, 4, 6};
+    const std::size_t N = path.size();
+
+    Matrix matrix(N, N, 3, 0.5, Matrix::implicit);
+    for (std::size_t i = 0; i < N; ++i) {
+        matrix.entry(i, i) = 1.0;
+    }
+    for (std::size_t k = 0; k + 1 < N; ++k) {
+        std::size_t u = path[k];
+        std::size_t v = path[k + 1];
+        matrix.entry(u, v) = 1.0;
+        matrix.entry(v, u) = 1.0;
+    }
+    matrix.compress();
+
+    // Natural identity ordering
+    std::vector<std::size_t> naturalOrder(N);
+    std::iota(naturalOrder.begin(), naturalOrder.end(), 0);
+    std::size_t initialBandwidth = computeBandwidth(matrix, naturalOrder);
+    // In scrambled line, initial bandwidth is high (e.g. |8 - 1| = 7)
+    BOOST_CHECK(initialBandwidth >= 5);
+
+    Graph graph(matrix);
+    auto rcmOrder = Opm::reorderReverseCuthillMcKee(graph);
+    checkAllIndices(rcmOrder);
+
+    std::size_t rcmBandwidth = computeBandwidth(matrix, rcmOrder);
+    // For any 1D simple path, RCM MUST achieve optimal bandwidth = 1!
+    BOOST_CHECK_EQUAL(rcmBandwidth, 1);
+}
+
+BOOST_AUTO_TEST_CASE(TestReverseCuthillMcKee2DGrid)
+{
+    using Matrix = Dune::BCRSMatrix<Dune::FieldMatrix<double,1,1>>;
+    using Graph = Dune::Amg::MatrixGraph<Matrix>;
+    const int N = 10;
+    Matrix matrix(N*N, N*N, 5, 0.4, Matrix::implicit);
+    for (int j = 0; j < N; j++) {
+        for (int i = 0; i < N; i++) {
+            auto index = j * N + i;
+            matrix.entry(index, index) = 1;
+
+            if (i > 0) matrix.entry(index, index - 1) = 1;
+            if (i < N - 1) matrix.entry(index, index + 1) = 1;
+            if (j > 0) matrix.entry(index, index - N) = 1;
+            if (j < N - 1) matrix.entry(index, index + N) = 1;
+        }
+    }
+    matrix.compress();
+
+    Graph graph(matrix);
+    auto rcmOrder = Opm::reorderReverseCuthillMcKee(graph);
+    checkAllIndices(rcmOrder);
+    BOOST_CHECK_EQUAL(rcmOrder.size(), N * N);
+}
+
+BOOST_AUTO_TEST_CASE(TestReverseCuthillMcKeeWithGhostCells)
+{
+    using Matrix = Dune::BCRSMatrix<Dune::FieldMatrix<double,1,1>>;
+    using Graph = Dune::Amg::MatrixGraph<Matrix>;
+    const int N = 10;
+    const std::size_t total = N * N;
+    const std::size_t interior = 70; // 70 interior nodes, 30 ghost nodes
+
+    Matrix matrix(total, total, 5, 0.4, Matrix::implicit);
+    for (int j = 0; j < N; j++) {
+        for (int i = 0; i < N; i++) {
+            auto index = j * N + i;
+            matrix.entry(index, index) = 1;
+
+            if (i > 0) matrix.entry(index, index - 1) = 1;
+            if (i < N - 1) matrix.entry(index, index + 1) = 1;
+            if (j > 0) matrix.entry(index, index - N) = 1;
+            if (j < N - 1) matrix.entry(index, index + N) = 1;
+        }
+    }
+    matrix.compress();
+
+    Graph graph(matrix);
+    auto rcmOrder = Opm::reorderReverseCuthillMcKee(graph, interior);
+    checkAllIndices(rcmOrder);
+
+    // Verify interior cells map strictly to [0, interior - 1]
+    for (std::size_t i = 0; i < interior; ++i) {
+        BOOST_CHECK(rcmOrder[i] < interior);
+    }
+    // Verify ghost cells [interior, total - 1] retain their exact indices
+    for (std::size_t i = interior; i < total; ++i) {
+        BOOST_CHECK_EQUAL(rcmOrder[i], i);
+    }
+}
+
 // The following tests verify the graph coloring in the context of revealing which rows
 // can be operated on at the same time in the DILU preconditioner
 BOOST_AUTO_TEST_CASE(TestColoredDiluParallelisms3x3Matrix)

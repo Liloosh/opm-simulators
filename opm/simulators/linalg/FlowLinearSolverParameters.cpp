@@ -40,6 +40,7 @@ void FlowLinearSolverParameters::init(bool cprRequestedInDataFile)
     ilu_milu_ = convertString2Milu(Parameters::Get<Parameters::MiluVariant>());
     ilu_redblack_ = Parameters::Get<Parameters::IluRedblack>();
     ilu_reorder_sphere_ = Parameters::Get<Parameters::IluReorderSpheres>();
+    ilu_rcm_ = Parameters::Get<Parameters::IluRcm>();
     newton_use_gmres_ = Parameters::Get<Parameters::UseGmres>();
     ignoreConvergenceFailure_ = Parameters::Get<Parameters::LinearSolverIgnoreConvergenceFailure>();
     scale_linear_system_ = Parameters::Get<Parameters::ScaleLinearSystem>();
@@ -135,6 +136,9 @@ void FlowLinearSolverParameters::registerParameters()
          "If false the original ordering is preserved in each color. "
          "Otherwise why try to ensure D4 ordering (in a 2D structured grid, "
          "the diagonal elements are consecutive)");
+    Parameters::Register<Parameters::IluRcm>
+        ("Use Reverse Cuthill-McKee (RCM) ordering for the ILU preconditioner "
+         "to reduce matrix bandwidth and cache footprint");
     Parameters::Register<Parameters::UseGmres>
         ("Use GMRES as the linear solver");
     Parameters::Register<Parameters::LinearSolverIgnoreConvergenceFailure>
@@ -230,6 +234,7 @@ void FlowLinearSolverParameters::reset()
     ilu_milu_                 = MILU_VARIANT::ILU;
     ilu_redblack_             = false;
     ilu_reorder_sphere_       = false;
+    ilu_rcm_                  = false;
     newton_use_gmres_         = false;
     ignoreConvergenceFailure_ = false;
     scale_linear_system_      = false;

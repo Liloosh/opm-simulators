@@ -249,14 +249,14 @@ ParallelOverlappingILU0<Matrix,Domain,Range,ParallelInfoT>::
 ParallelOverlappingILU0(const Matrix& A,
                         const int n, const field_type w,
                         MILU_VARIANT milu, bool redblack,
-                        bool reorder_sphere)
+                        bool reorder_sphere, bool rcm)
     : lower_(),
       upper_(),
       inv_(),
       comm_(nullptr), w_(w),
       relaxation_( std::abs( w - 1.0 ) > 1e-15 ),
       A_(&reinterpret_cast<const Matrix&>(A)), iluIteration_(n),
-      milu_(milu), redBlack_(redblack), reorderSphere_(reorder_sphere)
+      milu_(milu), redBlack_(redblack), reorderSphere_(reorder_sphere), rcm_(rcm)
 {
     interiorSize_ = A.N();
     // BlockMatrix is a Subclass of FieldMatrix that just adds
@@ -269,14 +269,14 @@ ParallelOverlappingILU0<Matrix,Domain,Range,ParallelInfoT>::
 ParallelOverlappingILU0(const Matrix& A,
                         const ParallelInfo& comm, const int n, const field_type w,
                         MILU_VARIANT milu, bool redblack,
-                        bool reorder_sphere)
+                        bool reorder_sphere, bool rcm)
     : lower_(),
       upper_(),
       inv_(),
       comm_(&comm), w_(w),
       relaxation_( std::abs( w - 1.0 ) > 1e-15 ),
       A_(&reinterpret_cast<const Matrix&>(A)), iluIteration_(n),
-      milu_(milu), redBlack_(redblack), reorderSphere_(reorder_sphere)
+      milu_(milu), redBlack_(redblack), reorderSphere_(reorder_sphere), rcm_(rcm)
 {
     interiorSize_ = A.N();
     // BlockMatrix is a Subclass of FieldMatrix that just adds
@@ -288,8 +288,8 @@ template<class Matrix, class Domain, class Range, class ParallelInfoT>
 ParallelOverlappingILU0<Matrix,Domain,Range,ParallelInfoT>::
 ParallelOverlappingILU0(const Matrix& A,
                         const field_type w, MILU_VARIANT milu, bool redblack,
-                        bool reorder_sphere)
-    : ParallelOverlappingILU0( A, 0, w, milu, redblack, reorder_sphere )
+                        bool reorder_sphere, bool rcm)
+    : ParallelOverlappingILU0( A, 0, w, milu, redblack, reorder_sphere, rcm )
 {}
 
 template<class Matrix, class Domain, class Range, class ParallelInfoT>
@@ -297,14 +297,14 @@ ParallelOverlappingILU0<Matrix,Domain,Range,ParallelInfoT>::
 ParallelOverlappingILU0(const Matrix& A,
                         const ParallelInfo& comm, const field_type w,
                         MILU_VARIANT milu, bool redblack,
-                        bool reorder_sphere)
+                        bool reorder_sphere, bool rcm)
     : lower_(),
       upper_(),
       inv_(),
       comm_(&comm), w_(w),
       relaxation_( std::abs( w - 1.0 ) > 1e-15 ),
       A_(&reinterpret_cast<const Matrix&>(A)), iluIteration_(0),
-      milu_(milu), redBlack_(redblack), reorderSphere_(reorder_sphere)
+      milu_(milu), redBlack_(redblack), reorderSphere_(reorder_sphere), rcm_(rcm)
 {
     interiorSize_ = A.N();
     // BlockMatrix is a Subclass of FieldMatrix that just adds
@@ -318,7 +318,7 @@ ParallelOverlappingILU0(const Matrix& A,
                         const ParallelInfo& comm,
                         const field_type w, MILU_VARIANT milu,
                         size_type interiorSize, bool redblack,
-                        bool reorder_sphere)
+                        bool reorder_sphere, bool rcm)
     : lower_(),
       upper_(),
       inv_(),
@@ -326,7 +326,7 @@ ParallelOverlappingILU0(const Matrix& A,
       relaxation_( std::abs( w - 1.0 ) > 1e-15 ),
       interiorSize_(interiorSize),
       A_(&reinterpret_cast<const Matrix&>(A)), iluIteration_(0),
-      milu_(milu), redBlack_(redblack), reorderSphere_(reorder_sphere)
+      milu_(milu), redBlack_(redblack), reorderSphere_(reorder_sphere), rcm_(rcm)
 {
     // BlockMatrix is a Subclass of FieldMatrix that just adds
     // methods. Therefore this cast should be safe.
@@ -404,11 +404,6 @@ apply (Domain& v, const Range& d)
         }
     }
 
-    {
-        Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_comm_time, profiler.ilu0_comm_calls);
-        copyOwnerToAll( mv );
-    }
-
     if( relaxation_ ) {
         Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_relax_time, profiler.ilu0_relax_calls);
         mv *= w_;
@@ -416,6 +411,10 @@ apply (Domain& v, const Range& d)
     {
         Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_reorder_time, profiler.ilu0_reorder_calls);
         reorderBack(mv, v);
+    }
+    {
+        Dune::ScopedKernelTimer timer(do_profile, profiler.ilu0_comm_time, profiler.ilu0_comm_calls);
+        copyOwnerToAll( v );
     }
 }
 
@@ -456,7 +455,16 @@ update()
     std::string message;
     const int rank = comm_ ? comm_->communicator().rank() : 0;
 
-    if (redBlack_)
+    if (rcm_)
+    {
+        if (ordering_.empty())
+        {
+            using Graph = Dune::Amg::MatrixGraph<const Matrix>;
+            Graph graph(*A_);
+            ordering_ = reorderReverseCuthillMcKee(graph, interiorSize_);
+        }
+    }
+    else if (redBlack_)
     {
         using Graph = Dune::Amg::MatrixGraph<const Matrix>;
         Graph graph(*A_);
@@ -517,25 +525,38 @@ update()
             }
             else
             {
-                ILU_ = std::make_unique<Matrix>(A_->N(), A_->M(),
-                                                A_->nonzeroes(), Matrix::row_wise);
-                auto& newA = *ILU_;
-                // Create sparsity pattern
-                for (auto iter = newA.createbegin(), iend = newA.createend(); iter != iend; ++iter)
-                {
-                    const auto& row = (*A_)[inverseOrdering[iter.index()]];
-                    for (auto col = row.begin(), cend = row.end(); col != cend; ++col)
+                if (ILU_) {
+                    OPM_TIMEBLOCK(iluDecompositionMakeMatrix);
+                    // Sparsity pattern already created! Copy values.
+                    for (auto iter = A_->begin(), iend = A_->end(); iter != iend; ++iter)
                     {
-                        iter.insert(ordering_[col.index()]);
+                        auto& newRow = (*ILU_)[ordering_[iter.index()]];
+                        for (auto col = iter->begin(), cend = iter->end(); col != cend; ++col)
+                        {
+                            newRow[ordering_[col.index()]] = *col;
+                        }
                     }
-                }
-                // Copy values
-                for (auto iter = A_->begin(), iend = A_->end(); iter != iend; ++iter)
-                {
-                    auto& newRow = newA[ordering_[iter.index()]];
-                    for (auto col = iter->begin(), cend = iter->end(); col != cend; ++col)
+                } else {
+                    ILU_ = std::make_unique<Matrix>(A_->N(), A_->M(),
+                                                    A_->nonzeroes(), Matrix::row_wise);
+                    auto& newA = *ILU_;
+                    // Create sparsity pattern
+                    for (auto iter = newA.createbegin(), iend = newA.createend(); iter != iend; ++iter)
                     {
-                        newRow[ordering_[col.index()]] = *col;
+                        const auto& row = (*A_)[inverseOrdering[iter.index()]];
+                        for (auto col = row.begin(), cend = row.end(); col != cend; ++col)
+                        {
+                            iter.insert(ordering_[col.index()]);
+                        }
+                    }
+                    // Copy values
+                    for (auto iter = A_->begin(), iend = A_->end(); iter != iend; ++iter)
+                    {
+                        auto& newRow = newA[ordering_[iter.index()]];
+                        for (auto col = iter->begin(), cend = iter->end(); col != cend; ++col)
+                        {
+                            newRow[ordering_[col.index()]] = *col;
+                        }
                     }
                 }
             }

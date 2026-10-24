@@ -74,6 +74,7 @@ struct IluFillinLevel { static constexpr int value = 0; };
 struct MiluVariant { static constexpr auto value = "ilu"; };
 struct IluRedblack { static constexpr bool value = false; };
 struct IluReorderSpheres { static constexpr bool value = false; };
+struct IluRcm { static constexpr bool value = false; };
 struct UseGmres { static constexpr bool value = false; };
 struct LinearSolverIgnoreConvergenceFailure { static constexpr bool value = false; };
 struct ScaleLinearSystem { static constexpr bool value = false; };
@@ -116,6 +117,7 @@ struct FlowLinearSolverParameters
     MILU_VARIANT   ilu_milu_;
     bool   ilu_redblack_;
     bool   ilu_reorder_sphere_;
+    bool   ilu_rcm_;
     bool   newton_use_gmres_;
     bool   ignoreConvergenceFailure_;
     bool scale_linear_system_;

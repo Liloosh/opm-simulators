@@ -223,6 +223,187 @@ reorderVerticesSpheres(const std::vector<int>& colors,
     return indices;
 }
 
+/// \brief Reorder vertices using the Reverse Cuthill-McKee (RCM) algorithm.
+///
+/// This reduces matrix bandwidth and profile, significantly improving cache locality
+/// and reducing memory traffic during sparse triangular solves (ILU0 apply).
+///
+/// \param graph The graph to reorder (must adhere to Dune-ISTL MatrixGraph interface).
+/// \param numNodes The number of vertices to reorder. If 0, all vertices are reordered.
+///                 When numNodes < graph.noVertices() (e.g. interiorSize in parallel MPI),
+///                 only the first numNodes vertices are reordered among themselves,
+///                 preserving the interior/ghost partition.
+/// \return Permutation vector `ordering` where `ordering[old_vertex] = new_vertex`.
+template <class Graph>
+std::vector<std::size_t>
+reorderReverseCuthillMcKee(const Graph& graph, std::size_t numNodes = 0)
+{
+    const std::size_t totalVertices = graph.noVertices();
+    const std::size_t targetVertices = (numNodes > 0 && numNodes <= totalVertices) ? numNodes : totalVertices;
+
+    if (targetVertices <= 1) {
+        std::vector<std::size_t> identity(totalVertices);
+        std::iota(identity.begin(), identity.end(), 0);
+        return identity;
+    }
+
+    // Step 1: Build symmetric adjacency list for the target subgraph [0, targetVertices - 1]
+    std::vector<std::vector<std::size_t>> adj(targetVertices);
+    for (std::size_t u = 0; u < targetVertices; ++u) {
+        for (auto edge = graph.beginEdges(u), endEdge = graph.endEdges(u); edge != endEdge; ++edge) {
+            std::size_t v = edge.target();
+            if (v < targetVertices && v != u) {
+                adj[u].push_back(v);
+                adj[v].push_back(u); // Ensure symmetry (A + A^T)
+            }
+        }
+    }
+
+    // Deduplicate neighbor lists and compute degrees
+    std::vector<std::size_t> degree(targetVertices);
+    for (std::size_t u = 0; u < targetVertices; ++u) {
+        std::sort(adj[u].begin(), adj[u].end());
+        adj[u].erase(std::unique(adj[u].begin(), adj[u].end()), adj[u].end());
+        degree[u] = adj[u].size();
+    }
+
+    // Step 2: Helper to find pseudo-peripheral vertex in a connected component
+    auto findPseudoPeripheral = [&](std::size_t start) -> std::size_t {
+        std::size_t current = start;
+        std::size_t maxDistance = 0;
+
+        for (int sweep = 0; sweep < 5; ++sweep) {
+            std::vector<int> dist(targetVertices, -1);
+            std::queue<std::size_t> q;
+            q.push(current);
+            dist[current] = 0;
+
+            std::size_t maxD = 0;
+            std::vector<std::size_t> furthestNodes;
+
+            while (!q.empty()) {
+                std::size_t u = q.front();
+                q.pop();
+
+                std::size_t d = static_cast<std::size_t>(dist[u]);
+                if (d > maxD) {
+                    maxD = d;
+                    furthestNodes.clear();
+                    furthestNodes.push_back(u);
+                } else if (d == maxD) {
+                    furthestNodes.push_back(u);
+                }
+
+                for (std::size_t v : adj[u]) {
+                    if (dist[v] == -1) {
+                        dist[v] = dist[u] + 1;
+                        q.push(v);
+                    }
+                }
+            }
+
+            if (maxD <= maxDistance && sweep > 0) {
+                break;
+            }
+            maxDistance = maxD;
+
+            // Pick candidate with minimum degree among furthest nodes
+            std::size_t bestCandidate = furthestNodes[0];
+            std::size_t minDeg = degree[bestCandidate];
+            for (std::size_t cand : furthestNodes) {
+                if (degree[cand] < minDeg) {
+                    minDeg = degree[cand];
+                    bestCandidate = cand;
+                }
+            }
+
+            if (bestCandidate == current) {
+                break;
+            }
+            current = bestCandidate;
+        }
+        return current;
+    };
+
+    // Step 3: Cuthill-McKee BFS over all connected components
+    std::vector<bool> visited(targetVertices, false);
+    std::vector<std::size_t> rcmOrder;
+    rcmOrder.reserve(targetVertices);
+
+    std::size_t visitedCount = 0;
+    while (visitedCount < targetVertices) {
+        // Find unvisited vertex with minimum degree
+        std::size_t root = targetVertices;
+        std::size_t minDeg = std::numeric_limits<std::size_t>::max();
+        for (std::size_t u = 0; u < targetVertices; ++u) {
+            if (!visited[u] && degree[u] < minDeg) {
+                minDeg = degree[u];
+                root = u;
+            }
+        }
+        if (root == targetVertices) {
+            break;
+        }
+
+        // Find pseudo-peripheral vertex for this connected component
+        std::size_t startNode = findPseudoPeripheral(root);
+
+        // BFS traversal for Cuthill-McKee
+        std::vector<std::size_t> componentCM;
+        std::queue<std::size_t> q;
+
+        q.push(startNode);
+        visited[startNode] = true;
+        componentCM.push_back(startNode);
+        ++visitedCount;
+
+        while (!q.empty()) {
+            std::size_t u = q.front();
+            q.pop();
+
+            // Collect unvisited neighbors
+            std::vector<std::size_t> unvisitedNeighbors;
+            for (std::size_t v : adj[u]) {
+                if (!visited[v]) {
+                    visited[v] = true;
+                    ++visitedCount;
+                    unvisitedNeighbors.push_back(v);
+                }
+            }
+
+            // Sort unvisited neighbors by degree ascending (tie-break by index)
+            std::stable_sort(unvisitedNeighbors.begin(), unvisitedNeighbors.end(),
+                             [&degree](std::size_t a, std::size_t b) {
+                                 if (degree[a] != degree[b]) {
+                                     return degree[a] < degree[b];
+                                 }
+                                 return a < b;
+                             });
+
+            for (std::size_t v : unvisitedNeighbors) {
+                q.push(v);
+                componentCM.push_back(v);
+            }
+        }
+
+        // Reverse Cuthill-McKee for this component
+        std::reverse(componentCM.begin(), componentCM.end());
+        rcmOrder.insert(rcmOrder.end(), componentCM.begin(), componentCM.end());
+    }
+
+    // Step 4: Construct ordering vector `ordering[old_idx] = new_idx`
+    std::vector<std::size_t> ordering(totalVertices);
+    for (std::size_t newIdx = 0; newIdx < rcmOrder.size(); ++newIdx) {
+        ordering[rcmOrder[newIdx]] = newIdx;
+    }
+    // Any remaining vertices (e.g. ghost cells in parallel) retain their identity
+    for (std::size_t k = targetVertices; k < totalVertices; ++k) {
+        ordering[k] = k;
+    }
+
+    return ordering;
+}
+
 /// \brief Specify coloring type.
 /// \details The coloring types have been implemented initially to parallelize DILU
 ///          preconditioner and parallel sparse triangular solves.
