@@ -476,6 +476,7 @@ std::unique_ptr<Matrix> blockJacobiAdjacency(const Grid& grid,
                 if (profiler.enabled) {
                     profiler.initSession(parameters_[activeSolverNum_].solver_profile_dir_);
                 }
+                Dune::set_openmp_spmv_enabled(parameters_[activeSolverNum_].enable_openmp_spmv_);
                 const auto& matrix = getMatrix();
                 using BlockType = typename Matrix::block_type;
                 profiler.recordMatrix(static_cast<uint64_t>(matrix.N()) * static_cast<uint64_t>(BlockType::rows),

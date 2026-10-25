@@ -325,9 +325,19 @@ public:
         : A_( A ), wellOper_( wellOper ), interiorSize_(interiorSize)
     {}
 
-    void apply(const X& x, Y& y) const override
+    void apply_seq(const X& x, Y& y) const
     {
-        OPM_TIMEBLOCK(apply);
+        for (auto row = A_.begin(); row.index() < interiorSize_; ++row)
+        {
+            y[row.index()]=0;
+            auto endc = (*row).end();
+            for (auto col = (*row).begin(); col != endc; ++col)
+                (*col).umv(x[col.index()], y[row.index()]);
+        }
+    }
+
+    void apply_omp(const X& x, Y& y) const
+    {
         const auto n = interiorSize_;
 #if defined(_OPENMP)
 #pragma omp parallel for schedule(static) default(shared) if(n >= 512)
@@ -340,6 +350,16 @@ public:
             for (auto col = row.begin(); col != endc; ++col)
                 (*col).umv(x[col.index()], y[r]);
         }
+    }
+
+    void apply(const X& x, Y& y) const override
+    {
+        OPM_TIMEBLOCK(apply);
+        if (Dune::openmp_spmv_enabled()) {
+            apply_omp(x, y);
+        } else {
+            apply_seq(x, y);
+        }
 
         // add well model modification to y
         wellOper_.apply(x, y);
@@ -347,10 +367,18 @@ public:
         ghostLastProject(y);
     }
 
-    // y += \alpha * A * x
-    void applyscaleadd (field_type alpha, const X& x, Y& y) const override
+    void applyscaleadd_seq(field_type alpha, const X& x, Y& y) const
     {
-        OPM_TIMEBLOCK(applyscaleadd);
+        for (auto row = A_.begin(); row.index() < interiorSize_; ++row)
+        {
+            auto endc = (*row).end();
+            for (auto col = (*row).begin(); col != endc; ++col)
+                (*col).usmv(alpha, x[col.index()], y[row.index()]);
+        }
+    }
+
+    void applyscaleadd_omp(field_type alpha, const X& x, Y& y) const
+    {
         const auto n = interiorSize_;
         const auto alpha_val = alpha;
 #if defined(_OPENMP)
@@ -363,6 +391,18 @@ public:
             for (auto col = row.begin(); col != endc; ++col)
                 (*col).usmv(alpha_val, x[col.index()], y[r]);
         }
+    }
+
+    // y += \alpha * A * x
+    void applyscaleadd (field_type alpha, const X& x, Y& y) const override
+    {
+        OPM_TIMEBLOCK(applyscaleadd);
+        if (Dune::openmp_spmv_enabled()) {
+            applyscaleadd_omp(alpha, x, y);
+        } else {
+            applyscaleadd_seq(alpha, x, y);
+        }
+
         // add scaled well model modification to y
         wellOper_.applyscaleadd(alpha, x, y);
 
@@ -443,7 +483,18 @@ public:
         interiorSize_ = setInteriorSize(comm_);
     }
 
-    virtual void apply( const X& x, Y& y ) const override
+    void apply_seq( const X& x, Y& y ) const
+    {
+        for (auto row = A_->begin(); row.index() < interiorSize_; ++row)
+        {
+            y[row.index()]=0;
+            auto endc = (*row).end();
+            for (auto col = (*row).begin(); col != endc; ++col)
+                (*col).umv(x[col.index()], y[row.index()]);
+        }
+    }
+
+    void apply_omp( const X& x, Y& y ) const
     {
         const auto n = interiorSize_;
 #if defined(_OPENMP)
@@ -457,12 +508,30 @@ public:
             for (auto col = row.begin(); col != endc; ++col)
                 (*col).umv(x[col.index()], y[r]);
         }
+    }
+
+    virtual void apply( const X& x, Y& y ) const override
+    {
+        if (Dune::openmp_spmv_enabled()) {
+            apply_omp(x, y);
+        } else {
+            apply_seq(x, y);
+        }
 
         ghostLastProject( y );
     }
 
-    // y += \alpha * A * x
-    virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const override
+    void applyscaleadd_seq(field_type alpha, const X& x, Y& y) const
+    {
+        for (auto row = A_->begin(); row.index() < interiorSize_; ++row)
+        {
+            auto endc = (*row).end();
+            for (auto col = (*row).begin(); col != endc; ++col)
+                (*col).usmv(alpha, x[col.index()], y[row.index()]);
+        }
+    }
+
+    void applyscaleadd_omp(field_type alpha, const X& x, Y& y) const
     {
         const auto n = interiorSize_;
         const auto alpha_val = alpha;
@@ -475,6 +544,16 @@ public:
             const auto endc = row.end();
             for (auto col = row.begin(); col != endc; ++col)
                 (*col).usmv(alpha_val, x[col.index()], y[r]);
+        }
+    }
+
+    // y += \alpha * A * x
+    virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const override
+    {
+        if (Dune::openmp_spmv_enabled()) {
+            applyscaleadd_omp(alpha, x, y);
+        } else {
+            applyscaleadd_seq(alpha, x, y);
         }
 
         ghostLastProject( y );

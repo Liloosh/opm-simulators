@@ -99,6 +99,7 @@ struct SolverProfileFile { static constexpr auto value = ""; };
 struct SolverProfileDir { static constexpr auto value = "benchmark_runs"; };
 struct SolverProfilePrintSummary { static constexpr bool value = true; };
 struct SolverProfileDetailed { static constexpr bool value = false; };
+struct EnableOpenmpSpmv { static constexpr bool value = true; };
 } // namespace Opm::Parameters
 
 namespace Opm {
@@ -142,6 +143,7 @@ struct FlowLinearSolverParameters
     std::string solver_profile_dir_;
     bool solver_profile_print_summary_;
     bool solver_profile_detailed_;
+    bool enable_openmp_spmv_;
 
     FlowLinearSolverParameters() { reset(); }
 

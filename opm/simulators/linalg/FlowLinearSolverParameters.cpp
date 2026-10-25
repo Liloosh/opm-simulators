@@ -58,6 +58,7 @@ void FlowLinearSolverParameters::init(bool cprRequestedInDataFile)
     solver_profile_dir_ = Parameters::Get<Parameters::SolverProfileDir>();
     solver_profile_print_summary_ = Parameters::Get<Parameters::SolverProfilePrintSummary>();
     solver_profile_detailed_ = Parameters::Get<Parameters::SolverProfileDetailed>();
+    enable_openmp_spmv_ = Parameters::Get<Parameters::EnableOpenmpSpmv>();
 
     if (!Parameters::IsSet<Parameters::LinearSolver>() && cprRequestedInDataFile) {
         linsolver_ = "cpr";
@@ -214,6 +215,8 @@ void FlowLinearSolverParameters::registerParameters()
         ("Print summary table of linear solver profiling at simulation end (default: true)");
     Parameters::Register<Parameters::SolverProfileDetailed>
         ("Record detailed per-iteration solver timing history (default: false)");
+    Parameters::Register<Parameters::EnableOpenmpSpmv>
+        ("Enable OpenMP multi-threading in sparse matrix-vector multiplication (SpMV) (default: true)");
 
     Parameters::SetDefault<Parameters::LinearSolverVerbosity>(0);
 }
@@ -256,6 +259,7 @@ void FlowLinearSolverParameters::reset()
     solver_profile_dir_ = "benchmark_runs";
     solver_profile_print_summary_ = true;
     solver_profile_detailed_ = false;
+    enable_openmp_spmv_ = true;
 }
 
 } // namespace Opm
