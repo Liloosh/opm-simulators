@@ -25,6 +25,9 @@
 #include <dune/common/parallel/communication.hh>
 #include <dune/istl/operators.hh>
 #include <dune/istl/bcrsmatrix.hh>
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
 
 #include <opm/common/TimingMacros.hpp>
 
@@ -325,12 +328,17 @@ public:
     void apply(const X& x, Y& y) const override
     {
         OPM_TIMEBLOCK(apply);
-        for (auto row = A_.begin(); row.index() < interiorSize_; ++row)
+        const auto n = interiorSize_;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) default(shared) if(n >= 512)
+#endif
+        for (std::size_t r = 0; r < n; ++r)
         {
-            y[row.index()]=0;
-            auto endc = (*row).end();
-            for (auto col = (*row).begin(); col != endc; ++col)
-                (*col).umv(x[col.index()], y[row.index()]);
+            y[r] = 0;
+            const auto& row = A_[r];
+            const auto endc = row.end();
+            for (auto col = row.begin(); col != endc; ++col)
+                (*col).umv(x[col.index()], y[r]);
         }
 
         // add well model modification to y
@@ -343,11 +351,17 @@ public:
     void applyscaleadd (field_type alpha, const X& x, Y& y) const override
     {
         OPM_TIMEBLOCK(applyscaleadd);
-        for (auto row = A_.begin(); row.index() < interiorSize_; ++row)
+        const auto n = interiorSize_;
+        const auto alpha_val = alpha;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) default(shared) if(n >= 512)
+#endif
+        for (std::size_t r = 0; r < n; ++r)
         {
-            auto endc = (*row).end();
-            for (auto col = (*row).begin(); col != endc; ++col)
-                (*col).usmv(alpha, x[col.index()], y[row.index()]);
+            const auto& row = A_[r];
+            const auto endc = row.end();
+            for (auto col = row.begin(); col != endc; ++col)
+                (*col).usmv(alpha_val, x[col.index()], y[r]);
         }
         // add scaled well model modification to y
         wellOper_.applyscaleadd(alpha, x, y);
@@ -431,12 +445,17 @@ public:
 
     virtual void apply( const X& x, Y& y ) const override
     {
-        for (auto row = A_->begin(); row.index() < interiorSize_; ++row)
+        const auto n = interiorSize_;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) default(shared) if(n >= 512)
+#endif
+        for (std::size_t r = 0; r < n; ++r)
         {
-            y[row.index()]=0;
-            auto endc = (*row).end();
-            for (auto col = (*row).begin(); col != endc; ++col)
-                (*col).umv(x[col.index()], y[row.index()]);
+            y[r] = 0;
+            const auto& row = (*A_)[r];
+            const auto endc = row.end();
+            for (auto col = row.begin(); col != endc; ++col)
+                (*col).umv(x[col.index()], y[r]);
         }
 
         ghostLastProject( y );
@@ -445,11 +464,17 @@ public:
     // y += \alpha * A * x
     virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const override
     {
-        for (auto row = A_->begin(); row.index() < interiorSize_; ++row)
+        const auto n = interiorSize_;
+        const auto alpha_val = alpha;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) default(shared) if(n >= 512)
+#endif
+        for (std::size_t r = 0; r < n; ++r)
         {
-            auto endc = (*row).end();
-            for (auto col = (*row).begin(); col != endc; ++col)
-                (*col).usmv(alpha, x[col.index()], y[row.index()]);
+            const auto& row = (*A_)[r];
+            const auto endc = row.end();
+            for (auto col = row.begin(); col != endc; ++col)
+                (*col).usmv(alpha_val, x[col.index()], y[r]);
         }
 
         ghostLastProject( y );
