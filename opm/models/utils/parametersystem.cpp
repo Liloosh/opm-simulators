@@ -338,7 +338,7 @@ std::string transformKey(const std::string& s,
     for (unsigned i = 1; i < s.size(); ++i) {
         if (s[i] == '-') {
             ++i;
-            if (s.size() <= i || !std::isalpha(s[i])) {
+            if (s.size() <= i || !std::isalnum(s[i])) {
                 throw std::runtime_error(errorPrefix + "Invalid parameter name '" + s + "'");
             }
             result += static_cast<char>(std::toupper(s[i]));

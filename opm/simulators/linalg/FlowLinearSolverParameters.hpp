@@ -101,6 +101,7 @@ struct SolverProfilePrintSummary { static constexpr bool value = true; };
 struct SolverProfileDetailed { static constexpr bool value = false; };
 struct EnableOpenmpSpmv { static constexpr bool value = true; };
 struct Enable2rowBlocking { static constexpr bool value = false; };
+struct EnableTwoRowBlocking { static constexpr bool value = false; };
 } // namespace Opm::Parameters
 
 namespace Opm {

@@ -59,7 +59,8 @@ void FlowLinearSolverParameters::init(bool cprRequestedInDataFile)
     solver_profile_print_summary_ = Parameters::Get<Parameters::SolverProfilePrintSummary>();
     solver_profile_detailed_ = Parameters::Get<Parameters::SolverProfileDetailed>();
     enable_openmp_spmv_ = Parameters::Get<Parameters::EnableOpenmpSpmv>();
-    enable_2row_blocking_ = Parameters::Get<Parameters::Enable2rowBlocking>();
+    enable_2row_blocking_ = Parameters::Get<Parameters::Enable2rowBlocking>() ||
+                            Parameters::Get<Parameters::EnableTwoRowBlocking>();
 
     if (!Parameters::IsSet<Parameters::LinearSolver>() && cprRequestedInDataFile) {
         linsolver_ = "cpr";
@@ -220,6 +221,8 @@ void FlowLinearSolverParameters::registerParameters()
         ("Enable OpenMP multi-threading in sparse matrix-vector multiplication (SpMV) (default: true)");
     Parameters::Register<Parameters::Enable2rowBlocking>
         ("Enable 2-row register blocking optimization in sparse matrix-vector multiplication (SpMV) (default: false)");
+    Parameters::Register<Parameters::EnableTwoRowBlocking>
+        ("Alias for enable-2row-blocking (default: false)");
 
     Parameters::SetDefault<Parameters::LinearSolverVerbosity>(0);
 }
