@@ -100,6 +100,7 @@ struct SolverProfileDir { static constexpr auto value = "benchmark_runs"; };
 struct SolverProfilePrintSummary { static constexpr bool value = true; };
 struct SolverProfileDetailed { static constexpr bool value = false; };
 struct EnableOpenmpSpmv { static constexpr bool value = true; };
+struct Enable2rowBlocking { static constexpr bool value = false; };
 } // namespace Opm::Parameters
 
 namespace Opm {
@@ -144,6 +145,7 @@ struct FlowLinearSolverParameters
     bool solver_profile_print_summary_;
     bool solver_profile_detailed_;
     bool enable_openmp_spmv_;
+    bool enable_2row_blocking_;
 
     FlowLinearSolverParameters() { reset(); }
 

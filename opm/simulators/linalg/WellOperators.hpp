@@ -352,10 +352,84 @@ public:
         }
     }
 
+    void apply_2row_blocked(const X& x, Y& y) const
+    {
+        const auto n = interiorSize_;
+        const auto pairs = n / 2;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) default(shared) if(Dune::openmp_spmv_enabled() && pairs >= 256)
+#endif
+        for (std::size_t p = 0; p < pairs; ++p)
+        {
+            std::size_t r0 = 2 * p;
+            std::size_t r1 = r0 + 1;
+
+            y[r0] = 0;
+            y[r1] = 0;
+
+            const auto& row0 = A_[r0];
+            const auto& row1 = A_[r1];
+
+            auto it0 = row0.begin();
+            const auto end0 = row0.end();
+            auto it1 = row1.begin();
+            const auto end1 = row1.end();
+
+            while (it0 != end0 && it1 != end1)
+            {
+                std::size_t col0 = it0.index();
+                std::size_t col1 = it1.index();
+
+                if (col0 == col1)
+                {
+                    const auto& xj = x[col0];
+                    (*it0).umv(xj, y[r0]);
+                    (*it1).umv(xj, y[r1]);
+                    ++it0;
+                    ++it1;
+                }
+                else if (col0 < col1)
+                {
+                    (*it0).umv(x[col0], y[r0]);
+                    ++it0;
+                }
+                else
+                {
+                    (*it1).umv(x[col1], y[r1]);
+                    ++it1;
+                }
+            }
+
+            while (it0 != end0)
+            {
+                (*it0).umv(x[it0.index()], y[r0]);
+                ++it0;
+            }
+
+            while (it1 != end1)
+            {
+                (*it1).umv(x[it1.index()], y[r1]);
+                ++it1;
+            }
+        }
+
+        if (n % 2 != 0)
+        {
+            std::size_t last = n - 1;
+            y[last] = 0;
+            const auto& row = A_[last];
+            const auto endc = row.end();
+            for (auto col = row.begin(); col != endc; ++col)
+                (*col).umv(x[col.index()], y[last]);
+        }
+    }
+
     void apply(const X& x, Y& y) const override
     {
         OPM_TIMEBLOCK(apply);
-        if (Dune::openmp_spmv_enabled()) {
+        if (Dune::spmv_2row_blocking_enabled()) {
+            apply_2row_blocked(x, y);
+        } else if (Dune::openmp_spmv_enabled()) {
             apply_omp(x, y);
         } else {
             apply_seq(x, y);
@@ -393,11 +467,82 @@ public:
         }
     }
 
+    void applyscaleadd_2row_blocked(field_type alpha, const X& x, Y& y) const
+    {
+        const auto n = interiorSize_;
+        const auto pairs = n / 2;
+        const auto alpha_val = alpha;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) default(shared) if(Dune::openmp_spmv_enabled() && pairs >= 256)
+#endif
+        for (std::size_t p = 0; p < pairs; ++p)
+        {
+            std::size_t r0 = 2 * p;
+            std::size_t r1 = r0 + 1;
+
+            const auto& row0 = A_[r0];
+            const auto& row1 = A_[r1];
+
+            auto it0 = row0.begin();
+            const auto end0 = row0.end();
+            auto it1 = row1.begin();
+            const auto end1 = row1.end();
+
+            while (it0 != end0 && it1 != end1)
+            {
+                std::size_t col0 = it0.index();
+                std::size_t col1 = it1.index();
+
+                if (col0 == col1)
+                {
+                    const auto& xj = x[col0];
+                    (*it0).usmv(alpha_val, xj, y[r0]);
+                    (*it1).usmv(alpha_val, xj, y[r1]);
+                    ++it0;
+                    ++it1;
+                }
+                else if (col0 < col1)
+                {
+                    (*it0).usmv(alpha_val, x[col0], y[r0]);
+                    ++it0;
+                }
+                else
+                {
+                    (*it1).usmv(alpha_val, x[col1], y[r1]);
+                    ++it1;
+                }
+            }
+
+            while (it0 != end0)
+            {
+                (*it0).usmv(alpha_val, x[it0.index()], y[r0]);
+                ++it0;
+            }
+
+            while (it1 != end1)
+            {
+                (*it1).usmv(alpha_val, x[it1.index()], y[r1]);
+                ++it1;
+            }
+        }
+
+        if (n % 2 != 0)
+        {
+            std::size_t last = n - 1;
+            const auto& row = A_[last];
+            const auto endc = row.end();
+            for (auto col = row.begin(); col != endc; ++col)
+                (*col).usmv(alpha_val, x[col.index()], y[last]);
+        }
+    }
+
     // y += \alpha * A * x
     void applyscaleadd (field_type alpha, const X& x, Y& y) const override
     {
         OPM_TIMEBLOCK(applyscaleadd);
-        if (Dune::openmp_spmv_enabled()) {
+        if (Dune::spmv_2row_blocking_enabled()) {
+            applyscaleadd_2row_blocked(alpha, x, y);
+        } else if (Dune::openmp_spmv_enabled()) {
             applyscaleadd_omp(alpha, x, y);
         } else {
             applyscaleadd_seq(alpha, x, y);
@@ -510,9 +655,83 @@ public:
         }
     }
 
+    void apply_2row_blocked( const X& x, Y& y ) const
+    {
+        const auto n = interiorSize_;
+        const auto pairs = n / 2;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) default(shared) if(Dune::openmp_spmv_enabled() && pairs >= 256)
+#endif
+        for (std::size_t p = 0; p < pairs; ++p)
+        {
+            std::size_t r0 = 2 * p;
+            std::size_t r1 = r0 + 1;
+
+            y[r0] = 0;
+            y[r1] = 0;
+
+            const auto& row0 = (*A_)[r0];
+            const auto& row1 = (*A_)[r1];
+
+            auto it0 = row0.begin();
+            const auto end0 = row0.end();
+            auto it1 = row1.begin();
+            const auto end1 = row1.end();
+
+            while (it0 != end0 && it1 != end1)
+            {
+                std::size_t col0 = it0.index();
+                std::size_t col1 = it1.index();
+
+                if (col0 == col1)
+                {
+                    const auto& xj = x[col0];
+                    (*it0).umv(xj, y[r0]);
+                    (*it1).umv(xj, y[r1]);
+                    ++it0;
+                    ++it1;
+                }
+                else if (col0 < col1)
+                {
+                    (*it0).umv(x[col0], y[r0]);
+                    ++it0;
+                }
+                else
+                {
+                    (*it1).umv(x[col1], y[r1]);
+                    ++it1;
+                }
+            }
+
+            while (it0 != end0)
+            {
+                (*it0).umv(x[it0.index()], y[r0]);
+                ++it0;
+            }
+
+            while (it1 != end1)
+            {
+                (*it1).umv(x[it1.index()], y[r1]);
+                ++it1;
+            }
+        }
+
+        if (n % 2 != 0)
+        {
+            std::size_t last = n - 1;
+            y[last] = 0;
+            const auto& row = (*A_)[last];
+            const auto endc = row.end();
+            for (auto col = row.begin(); col != endc; ++col)
+                (*col).umv(x[col.index()], y[last]);
+        }
+    }
+
     virtual void apply( const X& x, Y& y ) const override
     {
-        if (Dune::openmp_spmv_enabled()) {
+        if (Dune::spmv_2row_blocking_enabled()) {
+            apply_2row_blocked(x, y);
+        } else if (Dune::openmp_spmv_enabled()) {
             apply_omp(x, y);
         } else {
             apply_seq(x, y);
@@ -547,10 +766,81 @@ public:
         }
     }
 
+    void applyscaleadd_2row_blocked(field_type alpha, const X& x, Y& y) const
+    {
+        const auto n = interiorSize_;
+        const auto pairs = n / 2;
+        const auto alpha_val = alpha;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) default(shared) if(Dune::openmp_spmv_enabled() && pairs >= 256)
+#endif
+        for (std::size_t p = 0; p < pairs; ++p)
+        {
+            std::size_t r0 = 2 * p;
+            std::size_t r1 = r0 + 1;
+
+            const auto& row0 = (*A_)[r0];
+            const auto& row1 = (*A_)[r1];
+
+            auto it0 = row0.begin();
+            const auto end0 = row0.end();
+            auto it1 = row1.begin();
+            const auto end1 = row1.end();
+
+            while (it0 != end0 && it1 != end1)
+            {
+                std::size_t col0 = it0.index();
+                std::size_t col1 = it1.index();
+
+                if (col0 == col1)
+                {
+                    const auto& xj = x[col0];
+                    (*it0).usmv(alpha_val, xj, y[r0]);
+                    (*it1).usmv(alpha_val, xj, y[r1]);
+                    ++it0;
+                    ++it1;
+                }
+                else if (col0 < col1)
+                {
+                    (*it0).usmv(alpha_val, x[col0], y[r0]);
+                    ++it0;
+                }
+                else
+                {
+                    (*it1).usmv(alpha_val, x[col1], y[r1]);
+                    ++it1;
+                }
+            }
+
+            while (it0 != end0)
+            {
+                (*it0).usmv(alpha_val, x[it0.index()], y[r0]);
+                ++it0;
+            }
+
+            while (it1 != end1)
+            {
+                (*it1).usmv(alpha_val, x[it1.index()], y[r1]);
+                ++it1;
+            }
+        }
+
+        if (n % 2 != 0)
+        {
+            std::size_t last = n - 1;
+            const auto& row = (*A_)[last];
+            const auto endc = row.end();
+            for (auto col = row.begin(); col != endc; ++col)
+                (*col).usmv(alpha_val, x[col.index()], y[last]);
+        }
+    }
+
     // y += \alpha * A * x
     virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const override
     {
-        if (Dune::openmp_spmv_enabled()) {
+        if (Dune::spmv_2row_blocking_enabled()) {
+            applyscaleadd_2row_blocked(alpha, x, y);
+        } else if (Dune::openmp_spmv_enabled()) {
             applyscaleadd_omp(alpha, x, y);
         } else {
             applyscaleadd_seq(alpha, x, y);
