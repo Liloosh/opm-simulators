@@ -24,6 +24,8 @@
 #       Default: RSC_16
 #   --all-cases, --all
 #       Run all 20 SPE11C resolution cases (RSC_16 to RSC_320)
+#   --bind-to-threads, --bind-threads, --use-hwthreads
+#       Force binding to hardware threads (logical vCPUs) even if physical cores are sufficient
 #   -o, --output-dir <DIR>
 #       Simulation output directory base (default: ./simulation_output)
 #   --profile-dir <DIR>
@@ -40,15 +42,13 @@
 
 set -uo pipefail
 
-# Avoid hwloc OpenGL / OpenCL scan hangs on systems without active display/GPU context
-export HWLOC_COMPONENTS="-gl,-opencl"
-
 # ----------------- Default Parameters -----------------
 PROCS=4
 THREADS=2
 PRECOND="ilu0"
 RAW_CASES=()
 ALL_CASES=false
+BIND_TO_THREADS=false
 CUSTOM_OUTPUT_DIR=""
 PROFILE_BASE_DIR="benchmark_runs"
 DRY_RUN=false
@@ -62,40 +62,39 @@ Usage: $0 [OPTIONS] [-- ADDITIONAL_FLOW_OPTIONS]
 
 Options:
   -p, -np, --procs <N>          Number of MPI processes [default: $PROCS]
-  -t, --threads <N>            Number of OpenMP threads per process [default: $THREADS]
-  -s, --precond <TYPE>         Preconditioner type [default: $PRECOND]
-                               (ilu0, cpr, dilu, amg, cprw, cpr_trueimpes, cpr_quasiimpes)
-  -c, --case, --cases <CASES>  One or multiple SPE11C cases or .DATA paths [default: RSC_16]
-                               Supports:
-                                 - Single: -c RSC_16
-                                 - Comma-separated: -c RSC_16,RSC_32,RSC_48
-                                 - Space-separated: -c "16 32 64"
-                                 - Repeat flag: -c RSC_16 -c RSC_32
-                                 - All available cases: -c all
-  --all-cases, --all           Run all 20 SPE11C cases (RSC_16 to RSC_320)
-  -o, --output-dir <DIR>       Directory for simulation output files
-                               [default: ./simulation_output/<case>_<precond>_np<P>_t<T>]
-  --profile-dir <DIR>          Base directory for solver profiler metrics
-                               [default: $PROFILE_BASE_DIR]
-  --dry-run                    Verify deck parsing and grid setup without time integration
-  --stop-on-error              Abort batch execution if any case fails
-  -h, --help                   Display this help message and exit
+  -t, --threads <N>             Number of OpenMP threads per process [default: $THREADS]
+  -s, --precond <TYPE>          Preconditioner type [default: $PRECOND]
+                                (ilu0, cpr, dilu, amg, cprw, cpr_trueimpes, cpr_quasiimpes)
+  -c, --case, --cases <CASES>   One or multiple SPE11C cases or .DATA paths [default: RSC_16]
+                                Supports:
+                                  - Single: -c RSC_16
+                                  - Comma-separated: -c RSC_16,RSC_32,RSC_48
+                                  - Space-separated: -c "16 32 64"
+                                  - Repeat flag: -c RSC_16 -c RSC_32
+                                  - All available cases: -c all
+  --all-cases, --all            Run all 20 SPE11C cases (RSC_16 to RSC_320)
+  --bind-to-threads             Force binding to hardware threads (logical vCPUs)
+                                even if physical cores are sufficient
+  -o, --output-dir <DIR>        Directory for simulation output files
+                                [default: ./simulation_output/<case>_<precond>_np<P>_t<T>]
+  --profile-dir <DIR>           Base directory for solver profiler metrics
+                                [default: $PROFILE_BASE_DIR]
+  --dry-run                     Verify deck parsing and grid setup without time integration
+  --stop-on-error               Abort batch execution if any case fails
+  -h, --help                    Display this help message and exit
 
 Examples:
   # Single case run
   $0 -p 4 -t 2 -s ilu0 -c RSC_16
 
+  # Test HyperThreading by forcing thread binding on 4 processes
+  $0 -p 4 -t 1 -s ilu0 -c RSC_16 --bind-to-threads
+
   # Multiple cases in sequence
   $0 -p 4 -t 2 -s ilu0 -c RSC_16,RSC_32,RSC_48
 
-  # Compare CPR on multiple cases
-  $0 -p 8 -t 1 -s cpr -c "RSC_16 RSC_32"
-
   # Fast dry-run check across multiple datasets
   $0 -p 2 -t 2 -s ilu0 -c 16,32,64 --dry-run
-
-  # Run all 20 resolutions
-  $0 -p 4 -t 2 -s ilu0 --all-cases
 EOF
     exit 0
 }
@@ -107,53 +106,33 @@ while [[ $# -gt 0 ]]; do
             PROCS="$2"
             shift 2
             ;;
-        --procs=*|--processes=*|-p=*|-np=*)
-            PROCS="${1#*=}"
-            shift
-            ;;
         -t|--threads|--threads-per-process)
             THREADS="$2"
             shift 2
-            ;;
-        --threads=*|--threads-per-process=*|-t=*)
-            THREADS="${1#*=}"
-            shift
             ;;
         -s|--precond|--preconditioner)
             PRECOND="$2"
             shift 2
             ;;
-        --precond=*|--preconditioner=*|-s=*)
-            PRECOND="${1#*=}"
-            shift
-            ;;
         -c|--case|--cases|--grid)
             RAW_CASES+=("$2")
             shift 2
             ;;
-        --case=*|--cases=*|--grid=*|-c=*)
-            RAW_CASES+=("${1#*=}")
-            shift
-            ;;
         --all-cases|--all)
             ALL_CASES=true
+            shift
+            ;;
+        --bind-to-threads|--bind-threads|--use-hwthreads|--force-threads)
+            BIND_TO_THREADS=true
             shift
             ;;
         -o|--output-dir)
             CUSTOM_OUTPUT_DIR="$2"
             shift 2
             ;;
-        --output-dir=*|-o=*)
-            CUSTOM_OUTPUT_DIR="${1#*=}"
-            shift
-            ;;
         --profile-dir)
             PROFILE_BASE_DIR="$2"
             shift 2
-            ;;
-        --profile-dir=*)
-            PROFILE_BASE_DIR="${1#*=}"
-            shift
             ;;
         --dry-run)
             DRY_RUN=true
@@ -238,7 +217,6 @@ elif [[ ${#RAW_CASES[@]} -eq 0 ]]; then
     TARGET_CASES=("RSC_16")
 else
     for item in "${RAW_CASES[@]}"; do
-        # Replace commas with spaces and iterate
         cleaned="${item//,/ }"
         for token in $cleaned; do
             token_upper="$(echo "$token" | tr '[:lower:]' '[:upper:]')"
@@ -285,7 +263,6 @@ for case_arg in "${TARGET_CASES[@]}"; do
         data_file="$(realpath "$case_arg")"
         case_name="$(basename "$case_arg" .DATA)"
     else
-        # Normalize string: "16" -> "RSC_16", "rsc_16" -> "RSC_16"
         c_clean="$(echo "$case_arg" | tr '[:lower:]' '[:upper:]')"
         if [[ ! "$c_clean" =~ ^RSC_ ]]; then
             c_clean="RSC_${c_clean}"
@@ -316,7 +293,7 @@ export OMP_NUM_THREADS="$THREADS"
 mkdir -p "$PROFILE_BASE_DIR"
 
 # Detect hardware CPU topology
-PHYS_CORES=$(grep -m1 "cpu cores" /proc/cpuinfo 2>/dev/null | awk '{print $4}')
+PHYS_CORES=$(lscpu -p=CORE,SOCKET | grep -v '^#' | sort -u | wc -l)
 TOTAL_VCPUS=$(nproc --all 2>/dev/null || grep -c "^processor" /proc/cpuinfo 2>/dev/null || echo 1)
 if [[ -z "$PHYS_CORES" || "$PHYS_CORES" -le 0 ]]; then
     PHYS_CORES=$TOTAL_VCPUS
@@ -326,16 +303,15 @@ TOTAL_EXEC_THREADS=$((PROCS * THREADS))
 MPI_LAUNCH_ARGS=()
 AFFINITY_NOTE=""
 
-if [[ $PROCS -le $PHYS_CORES && $THREADS -eq 1 ]]; then
+if [[ "$BIND_TO_THREADS" == false && $PROCS -le $PHYS_CORES && $THREADS -eq 1 ]]; then
     MPI_LAUNCH_ARGS=(--bind-to core -np "$PROCS")
     AFFINITY_NOTE="Clean physical core allocation (--bind-to core; zero oversubscription)"
 elif [[ $TOTAL_EXEC_THREADS -le $TOTAL_VCPUS ]]; then
-    if [[ $TOTAL_EXEC_THREADS -le $PHYS_CORES ]]; then
-        MPI_LAUNCH_ARGS=(--map-by ppr:${PROCS}:node:PE=${THREADS} --bind-to core -np "$PROCS")
-        AFFINITY_NOTE="Hybrid MPI+OpenMP physical core allocation (PE=${THREADS}; non-overlapping cores)"
+    MPI_LAUNCH_ARGS=(--use-hwthread-cpus --bind-to hwthread -np "$PROCS")
+    if [[ "$BIND_TO_THREADS" == true ]]; then
+        AFFINITY_NOTE="Forced hardware thread binding (--use-hwthread-cpus --bind-to hwthread; ${TOTAL_EXEC_THREADS} threads on ${TOTAL_VCPUS} vCPUs)"
     else
-        MPI_LAUNCH_ARGS=(--bind-to none -np "$PROCS")
-        AFFINITY_NOTE="Hybrid MPI+OpenMP allocation (--bind-to none; ${TOTAL_EXEC_THREADS} threads on ${TOTAL_VCPUS} vCPUs)"
+        AFFINITY_NOTE="HyperThreading/SMT active (--use-hwthread-cpus; ${TOTAL_EXEC_THREADS} threads on ${TOTAL_VCPUS} vCPUs)"
     fi
 else
     MPI_LAUNCH_ARGS=(--oversubscribe --bind-to none -np "$PROCS")
